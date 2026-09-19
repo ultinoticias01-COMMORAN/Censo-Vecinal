@@ -65,7 +65,7 @@ def init_db():
         )
     """)
     
-    # Tabla de Usuarios con permisos JSON
+    # Tabla de Usuarios
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             username TEXT PRIMARY KEY,
@@ -76,6 +76,21 @@ def init_db():
         )
     """)
     
+    # MIGRACIÓN AUTOMÁTICA DE COLUMNA PERMISOS EN USUARIOS
+    cursor.execute("PRAGMA table_info(usuarios)")
+    cols_usuarios = [column[1] for column in cursor.fetchall()]
+    if "permisos" not in cols_usuarios:
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN permisos TEXT DEFAULT '{}'")
+        
+        # Asignar permisos por defecto a usuarios creados previamente
+        perm_master = json.dumps({p: True for p in LISTA_PERMISOS})
+        perm_admin = json.dumps({p: True for p in LISTA_PERMISOS if p != "personalizar_etiquetas"})
+        perm_user = json.dumps({"ver_censo": True, "ver_estadisticas": True})
+        
+        cursor.execute("UPDATE usuarios SET permisos = ? WHERE username = 'master'", (perm_master,))
+        cursor.execute("UPDATE usuarios SET permisos = ? WHERE username = 'admin'", (perm_admin,))
+        cursor.execute("UPDATE usuarios SET permisos = ? WHERE username = 'user'", (perm_user,))
+
     # Tabla de Etiquetas Modificables de Campos
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS etiquetas_campos (
@@ -110,7 +125,7 @@ def init_db():
     for clave, val in ETIQUETAS_DEFAULT.items():
         cursor.execute("INSERT OR IGNORE INTO etiquetas_campos VALUES (?, ?)", (clave, val))
         
-    # Inicializar Usuarios por Defecto con Permisos
+    # Inicializar Usuarios por Defecto si la tabla está vacía
     cursor.execute("SELECT COUNT(*) FROM usuarios")
     if cursor.fetchone()[0] == 0:
         permisos_master = json.dumps({p: True for p in LISTA_PERMISOS})
@@ -219,7 +234,7 @@ def borrar_todo_el_censo():
     conn.commit()
     conn.close()
 
-# --- GESTIÓN DE CAMPOS DINÁMICOS ---
+# --- GESTIÓN DE CAMPOS DINÁMICOS EXTRA ---
 def cargar_campos_personalizados():
     conn = get_connection()
     cursor = conn.cursor()
@@ -236,13 +251,6 @@ def agregar_campo_personalizado(nombre, tipo):
         conn.commit()
     except sqlite3.IntegrityError:
         pass
-    conn.close()
-
-def eliminar_campo_personalizado(nombre):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM configuracion_campos WHERE nombre_campo = ?", (nombre,))
-    conn.commit()
     conn.close()
 
 # --- USUARIOS Y PERMISOS ---
@@ -323,7 +331,7 @@ if not st.session_state.autenticado:
     st.stop()
 
 # -----------------------------------------------------------------------------
-# 4. CÁRGA DE CONFIGURACIÓN DE ETIQUETAS
+# 4. CARGA DE CONFIGURACIÓN DE ETIQUETAS
 # -----------------------------------------------------------------------------
 lbl = cargar_etiquetas()
 
@@ -355,7 +363,7 @@ with st.sidebar:
                 st.success("Variable creada con éxito.")
                 st.rerun()
 
-    st.caption("Sistema de Censo Comunitario v4.0")
+    st.caption("Sistema de Censo Comunitario v4.1")
 
 # -----------------------------------------------------------------------------
 # 6. NAVEGACIÓN Y PESTAÑAS DINÁMICAS SEGÚN PERMISOS
@@ -717,8 +725,43 @@ if "💾 Respaldos y Borrado" in pestañas:
             st.markdown("### 📥 Importar Archivos (CSV / Excel)")
             uploaded_file = st.file_uploader("Cargar archivo", type=["csv", "xlsx"])
             if uploaded_file is not None and st.button("📥 Procesar e Importar"):
-                # Lógica de carga masiva
-                pass
+                try:
+                    if uploaded_file.name.endswith(".xlsx"):
+                        df_imp = pd.read_excel(uploaded_file)
+                    else:
+                        try:
+                            df_imp = pd.read_csv(uploaded_file, sep=";", encoding="utf-8-sig")
+                            if len(df_imp.columns) <= 1:
+                                uploaded_file.seek(0)
+                                df_imp = pd.read_csv(uploaded_file, sep=",")
+                        except:
+                            uploaded_file.seek(0)
+                            df_imp = pd.read_csv(uploaded_file, sep=",")
+
+                    df_imp.columns = [str(col).strip().lower() for col in df_imp.columns]
+
+                    for _, row in df_imp.iterrows():
+                        f_nac_imp = parsear_fecha_bd(row.get("fecha_nacimiento", row.get("fecha_nac", ""))).strftime("%Y-%m-%d")
+                        f_lleg_imp = parsear_fecha_bd(row.get("fecha_llegada", "")).strftime("%Y-%m-%d")
+
+                        guardar_habitante((
+                            str(row.get("cedula", "")).strip(),
+                            str(row.get("nombres", row.get("nombre", ""))).strip(),
+                            str(row.get("apellidos", row.get("apellido", ""))).strip(),
+                            str(row.get("sexo", "No especificado")).strip(),
+                            f_nac_imp,
+                            f_lleg_imp,
+                            str(row.get("direccion", "")).strip(),
+                            str(row.get("manzana", "")).strip(),
+                            str(row.get("telefono", "")).strip(),
+                            str(row.get("condicion_salud", "Ninguna")).strip(),
+                            str(row.get("detalle_salud", "")).strip(),
+                            str(row.get("campos_adicionales", "{}")).strip()
+                        ))
+                    st.success("✅ Importación completada.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al importar archivo: {e}")
 
         st.markdown("---")
         st.markdown("### ⚠️ Zona Peligrosa: Borrado Completo del Censo")
