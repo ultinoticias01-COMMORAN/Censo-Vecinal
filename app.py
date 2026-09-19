@@ -3,7 +3,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
-import io
 
 # -----------------------------------------------------------------------------
 # 1. CONFIGURACIÓN DE PÁGINA Y BASE DE DATOS
@@ -19,7 +18,7 @@ def init_db():
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Tabla de Habitantes (incluye campo 'sexo')
+    # Tabla de Habitantes
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS habitantes (
             cedula TEXT PRIMARY KEY,
@@ -33,6 +32,12 @@ def init_db():
             telefono TEXT
         )
     """)
+    
+    # MIGRACIÓN AUTOMÁTICA: Si la tabla ya existía sin la columna 'sexo', la agregamos
+    cursor.execute("PRAGMA table_info(habitantes)")
+    columnas = [column[1] for column in cursor.fetchall()]
+    if "sexo" not in columnas:
+        cursor.execute("ALTER TABLE habitantes ADD COLUMN sexo TEXT DEFAULT 'No especificado'")
     
     # Tabla de Usuarios y Roles
     cursor.execute("""
@@ -57,21 +62,12 @@ def init_db():
         )
     """)
     
-    # Crear usuario Master por defecto si no existen usuarios
+    # Crear usuarios por defecto si no existen
     cursor.execute("SELECT COUNT(*) FROM usuarios")
     if cursor.fetchone()[0] == 0:
-        cursor.execute(
-            "INSERT INTO usuarios VALUES (?, ?, ?, ?)",
-            ("master", "master123", "Usuario Master", "Master")
-        )
-        cursor.execute(
-            "INSERT INTO usuarios VALUES (?, ?, ?, ?)",
-            ("admin", "admin123", "Administrador Principal", "Administrador")
-        )
-        cursor.execute(
-            "INSERT INTO usuarios VALUES (?, ?, ?, ?)",
-            ("user", "user123", "Visualizador Invitado", "Visualizador")
-        )
+        cursor.execute("INSERT INTO usuarios VALUES (?, ?, ?, ?)", ("master", "master123", "Usuario Master", "Master"))
+        cursor.execute("INSERT INTO usuarios VALUES (?, ?, ?, ?)", ("admin", "admin123", "Administrador Principal", "Administrador"))
+        cursor.execute("INSERT INTO usuarios VALUES (?, ?, ?, ?)", ("user", "user123", "Visualizador Invitado", "Visualizador"))
     
     conn.commit()
     conn.close()
@@ -82,11 +78,13 @@ init_db()
 # 2. FUNCIONES DE BASE DE DATOS
 # -----------------------------------------------------------------------------
 
-# --- Habitantes ---
 def cargar_habitantes():
     conn = get_connection()
     df = pd.read_sql_query("SELECT * FROM habitantes", conn)
     conn.close()
+    if "sexo" not in df.columns:
+        df["sexo"] = "No especificado"
+    df["sexo"] = df["sexo"].fillna("No especificado")
     return df
 
 def guardar_habitante(datos):
@@ -312,9 +310,9 @@ with tabs[pestañas.index("📊 Consultar y Filtros")]:
         with col_f1:
             busqueda = st.text_input("Buscar por Nombre, Apellido o Cédula")
         with col_f2:
-            sector_sel = st.selectbox("Manzana / Sector", ["Todos"] + list(df["manzana"].unique()))
+            sector_sel = st.selectbox("Manzana / Sector", ["Todos"] + list(df["manzana"].dropna().unique()))
         with col_f3:
-            sexo_sel = st.selectbox("Filtrar por Sexo", ["Todos"] + list(df["sexo"].unique()))
+            sexo_sel = st.selectbox("Filtrar por Sexo", ["Todos"] + list(df["sexo"].dropna().unique()))
 
         df_filtrado = df.copy()
         if busqueda:
@@ -361,7 +359,6 @@ with tabs[pestañas.index("📈 Estadísticas (Gráficos)")]:
         
         rango_edad = st.slider("Selecciona el Rango de Edad que deseas ver:", min_value=0, max_value=100, value=(min_e, max_e))
         
-        # Filtrar DF según el slider
         df_range = df_stat[(df_stat["Edad"] >= rango_edad[0]) & (df_stat["Edad"] <= rango_edad[1])]
         
         st.write(f"Mostrando **{len(df_range)}** personas entre **{rango_edad[0]}** y **{rango_edad[1]}** años.")
@@ -370,7 +367,6 @@ with tabs[pestañas.index("📈 Estadísticas (Gráficos)")]:
             col_g1, col_g2 = st.columns(2)
             
             with col_g1:
-                # Gráfico de Torta por Sexo
                 fig_sexo = px.pie(
                     df_range, 
                     names="sexo", 
@@ -382,7 +378,6 @@ with tabs[pestañas.index("📈 Estadísticas (Gráficos)")]:
                 st.plotly_chart(fig_sexo, use_container_width=True)
                 
             with col_g2:
-                # Gráfico por Manzana / Sector en ese Rango de Edad
                 fig_sec = px.pie(
                     df_range, 
                     names="manzana", 
@@ -412,7 +407,6 @@ if ES_ADMIN_OR_MASTER and "📄 Bitácora de Documentos" in pestañas:
                 st.markdown("### 📝 Registrar Nuevo Documento")
                 cedula_sel = st.selectbox("Seleccionar Habitante (Cédula):", df_hab["cedula"].unique())
                 
-                # Obtener nombre del seleccionado
                 hab_info = df_hab[df_hab["cedula"] == cedula_sel].iloc[0]
                 st.info(f"**Habitante:** {hab_info['nombres']} {hab_info['apellidos']}")
                 
@@ -464,7 +458,8 @@ if ES_ADMIN_OR_MASTER and "⚙️ Editar / Eliminar" in pestañas:
                     e_apellidos = st.text_input("Apellidos", value=hab['apellidos'])
                     
                     opciones_sexo = ["Femenino", "Masculino", "Otro"]
-                    idx_sexo = opciones_sexo.index(hab['sexo']) if hab['sexo'] in opciones_sexo else 0
+                    val_sexo = hab['sexo'] if hab['sexo'] in opciones_sexo else "Femenino"
+                    idx_sexo = opciones_sexo.index(val_sexo)
                     e_sexo = st.selectbox("Sexo", opciones_sexo, index=idx_sexo)
                     
                     e_telefono = st.text_input("Teléfono", value=hab['telefono'])
@@ -546,13 +541,11 @@ if ES_MASTER and "💾 Respaldos e Importación" in pestañas:
         with col_db1:
             st.markdown("### 📤 Exportar / Descargar Datos")
             
-            # Descargar archivo SQLite completo
             with open(DB_FILE, "rb") as f:
                 bytes_db = f.read()
             st.download_button("💾 Descargar Base de Datos Completa (.db)", bytes_db, "censo_backup.db", "application/octet-stream")
             
             st.markdown("---")
-            # Exportar datos de habitantes a CSV / Excel
             df_exp = cargar_habitantes()
             csv_exp = df_exp.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Descargar Censo Completo (CSV)", csv_exp, "habitantes.csv", "text/csv")
@@ -560,7 +553,6 @@ if ES_MASTER and "💾 Respaldos e Importación" in pestañas:
         with col_db2:
             st.markdown("### 📥 Importar Datos")
             
-            # Subir y reemplazar Base de datos SQLite
             st.markdown("#### 1. Reemplazar Base de Datos (.db)")
             uploaded_db = st.file_uploader("Subir archivo .db", type=["db"])
             if uploaded_db is not None:
