@@ -184,7 +184,6 @@ def actualizar_habitante_completo(cedula_original, datos_nuevos):
     
     nueva_cedula = datos_nuevos[0]
     
-    # Si la cédula cambió, actualizamos primero la clave primaria y referencias
     if cedula_original != nueva_cedula:
         cursor.execute("UPDATE bitacora_documentos SET cedula = ? WHERE cedula = ?", (nueva_cedula, cedula_original))
         cursor.execute("DELETE FROM habitantes WHERE cedula = ?", (cedula_original,))
@@ -207,7 +206,7 @@ def eliminar_habitante(cedula):
     conn.commit()
     conn.close()
 
-# --- Gestión de Campos Personalizados Dinámicos ---
+# --- GESTIÓN AVANZADA DE CAMPOS PERSONALIZADOS DINÁMICOS ---
 def cargar_campos_personalizados():
     conn = get_connection()
     cursor = conn.cursor()
@@ -224,6 +223,49 @@ def agregar_campo_personalizado(nombre, tipo):
         conn.commit()
     except sqlite3.IntegrityError:
         pass
+    conn.close()
+
+def modificar_campo_personalizado(nombre_actual, nuevo_nombre, nuevo_tipo):
+    conn = get_connection()
+    cursor = conn.cursor()
+    # 1. Actualizar configuración
+    cursor.execute("UPDATE configuracion_campos SET nombre_campo = ?, tipo_campo = ? WHERE nombre_campo = ?", (nuevo_nombre, nuevo_tipo, nombre_actual))
+    
+    # 2. Renombrar la llave en los objetos JSON almacenados en la BD
+    cursor.execute("SELECT cedula, campos_adicionales FROM habitantes")
+    habitantes = cursor.fetchall()
+    for ced, json_str in habitantes:
+        try:
+            dict_extra = json.loads(json_str) if json_str else {}
+            if nombre_actual in dict_extra:
+                val = dict_extra.pop(nombre_actual)
+                dict_extra[nuevo_nombre] = val
+                cursor.execute("UPDATE habitantes SET campos_adicionales = ? WHERE cedula = ?", (json.dumps(dict_extra, ensure_ascii=False), ced))
+        except:
+            pass
+            
+    conn.commit()
+    conn.close()
+
+def eliminar_campo_personalizado(nombre):
+    conn = get_connection()
+    cursor = conn.cursor()
+    # 1. Eliminar de la tabla de configuración
+    cursor.execute("DELETE FROM configuracion_campos WHERE nombre_campo = ?", (nombre,))
+    
+    # 2. Remover la propiedad de los JSON de habitante existentes
+    cursor.execute("SELECT cedula, campos_adicionales FROM habitantes")
+    habitantes = cursor.fetchall()
+    for ced, json_str in habitantes:
+        try:
+            dict_extra = json.loads(json_str) if json_str else {}
+            if nombre in dict_extra:
+                del dict_extra[nombre]
+                cursor.execute("UPDATE habitantes SET campos_adicionales = ? WHERE cedula = ?", (json.dumps(dict_extra, ensure_ascii=False), ced))
+        except:
+            pass
+            
+    conn.commit()
     conn.close()
 
 # --- Usuarios y Bitácora ---
@@ -357,17 +399,17 @@ with st.sidebar:
     st.markdown("---")
     
     if st.session_state.rol_actual in ["Master", "Administrador"]:
-        st.subheader("➕ Agregar Nueva Variable")
-        nuevo_nom = st.text_input("Nombre de Variable:")
+        st.subheader("➕ Crear Variable Personalizada")
+        nuevo_nom = st.text_input("Nombre de la Variable:")
         nuevo_tipo = st.selectbox("Tipo de Dato:", ["Texto", "Número", "Fecha"])
         
         if st.button("Guardar Variable", use_container_width=True):
             if nuevo_nom.strip():
                 agregar_campo_personalizado(nuevo_nom.strip(), nuevo_tipo)
-                st.success("Variable agregada.")
+                st.success("Variable creada con éxito.")
                 st.rerun()
 
-    st.caption("Sistema de Censo Comunitario v3.0")
+    st.caption("Sistema de Censo Comunitario v3.5")
 
 ROL = st.session_state.rol_actual
 ES_MASTER = ROL == "Master"
@@ -417,7 +459,6 @@ if ES_ADMIN_OR_MASTER and "📝 Registrar Habitante" in pestañas:
                     apellidos = st.text_input("Apellidos*")
                 with col2:
                     sexo = st.selectbox("Sexo / Género*", ["Femenino", "Masculino", "Otro"])
-                    # FORMATO DE FECHA EN PANTALLA: DD/MM/YYYY
                     fecha_nac = st.date_input("Fecha de Nacimiento (DD/MM/YYYY)", min_value=datetime(1920, 1, 1), max_value=datetime.now(), format="DD/MM/YYYY")
                     telefono = st.text_input("Teléfono de Contacto")
 
@@ -426,7 +467,6 @@ if ES_ADMIN_OR_MASTER and "📝 Registrar Habitante" in pestañas:
                 col3, col4 = st.columns(2)
                 with col3:
                     manzana = st.text_input("Manzana / Sector")
-                    # FORMATO DE FECHA EN PANTALLA: DD/MM/YYYY
                     fecha_llegada = st.date_input("Fecha de Llegada a la Comunidad (DD/MM/YYYY)", min_value=datetime(1950, 1, 1), max_value=datetime.now(), format="DD/MM/YYYY")
                 with col4:
                     direccion = st.text_area("Dirección Detallada de Habitación")
@@ -482,7 +522,6 @@ with tabs[pestañas.index("📊 Consultar y Filtros")]:
         df["Edad"] = df["fecha_nac"].apply(calcular_edad)
         df["Tiempo Comunidad"] = df["fecha_llegada"].apply(calcular_tiempo_comunidad)
         
-        # Formatear fechas para visualizar en tabla (DD/MM/YYYY)
         df_pantalla = df.copy()
         df_pantalla["fecha_nac"] = df_pantalla["fecha_nac"].apply(formato_fecha_pantalla)
         df_pantalla["fecha_llegada"] = df_pantalla["fecha_llegada"].apply(formato_fecha_pantalla)
@@ -617,89 +656,134 @@ if ES_ADMIN_OR_MASTER and "📄 Bitácora de Documentos" in pestañas:
             st.info("Debe registrar habitantes primero.")
 
 # -----------------------------------------------------------------------------
-# TAB: EDITAR / ELIMINAR REGISTROS (EDICIÓN COMPLETA DE CÉDULA Y CAMPOS)
+# TAB: EDITAR / ELIMINAR REGISTROS Y GESTIÓN DE VARIABLES
 # -----------------------------------------------------------------------------
 if ES_ADMIN_OR_MASTER and "⚙️ Editar / Eliminar" in pestañas:
     with tabs[pestañas.index("⚙️ Editar / Eliminar")]:
-        st.subheader("⚙️ Modificación Total y Eliminación de Registros")
-        df_edit = cargar_habitantes()
+        st.subheader("⚙️ Modificación de Datos y Gestor Global de Variables")
         
-        if not df_edit.empty:
-            cedula_buscar = st.selectbox("Seleccione el habitante a modificar o eliminar:", df_edit["cedula"].unique())
-            hab = df_edit[df_edit["cedula"] == cedula_buscar].iloc[0]
-            
-            try:
-                dict_dyn = json.loads(hab["campos_adicionales"])
-            except:
-                dict_dyn = {}
-
-            st.warning(f"Está modificando a: **{hab['nombres']} {hab['apellidos']}** (Cédula actual: `{hab['cedula']}`)")
-
-            tab_e1, tab_e2, tab_e3, tab_e4 = st.tabs(["👤 Datos Personales & Cédula", "🏠 Ubicación", "⚕️ Salud", "➕ Personalizados"])
-
-            with st.form("form_edit_tabs"):
-                with tab_e1:
-                    st.markdown("##### Modificar Identificación y Datos Personales")
-                    # ¡AQUÍ MISMOS PUEDES EDITAR LA CÉDULA!
-                    e_cedula = st.text_input("Cédula de Identidad (Módifquela si es necesario):", value=hab['cedula'])
-                    e_nombres = st.text_input("Nombres:", value=hab['nombres'])
-                    e_apellidos = st.text_input("Apellidos:", value=hab['apellidos'])
-                    
-                    opciones_sexo = ["Femenino", "Masculino", "Otro"]
-                    val_sexo = hab['sexo'] if hab['sexo'] in opciones_sexo else "Femenino"
-                    e_sexo = st.selectbox("Sexo:", opciones_sexo, index=opciones_sexo.index(val_sexo))
-                    e_telefono = st.text_input("Teléfono:", value=hab['telefono'])
-
-                with tab_e2:
-                    fn_dt = parsear_fecha_bd(hab['fecha_nac'])
-                    fl_dt = parsear_fecha_bd(hab['fecha_llegada'])
-                    
-                    # FORMATO DE FECHA EN PANTALLA: DD/MM/YYYY
-                    e_fn = st.date_input("Fecha Nacimiento (DD/MM/YYYY):", value=fn_dt, format="DD/MM/YYYY")
-                    e_fl = st.date_input("Fecha Llegada (DD/MM/YYYY):", value=fl_dt, format="DD/MM/YYYY")
-                    e_manzana = st.text_input("Manzana / Sector:", value=hab['manzana'])
-                    e_direccion = st.text_area("Dirección:", value=hab['direccion'])
-
-                with tab_e3:
-                    opciones_salud = ["Ninguna", "Enfermedad Crónica", "Discapacidad", "Adulto Mayor Encamado", "Embarazada", "Población de Riesgo", "Otra"]
-                    val_salud = hab['condicion_salud'] if hab['condicion_salud'] in opciones_salud else "Ninguna"
-                    e_condicion_salud = st.selectbox("Condición de Salud:", opciones_salud, index=opciones_salud.index(val_salud))
-                    e_detalle_salud = st.text_input("Detalle Médicos:", value=hab['detalle_salud'])
-
-                with tab_e4:
-                    e_dict_extra = {}
-                    campos_cfg = cargar_campos_personalizados()
-                    for nom_c, tipo_c in campos_cfg:
-                        val_prev = dict_dyn.get(nom_c, "")
-                        if tipo_c == "Texto":
-                            e_dict_extra[nom_c] = st.text_input(nom_c, value=str(val_prev))
-                        elif tipo_c == "Número":
-                            e_dict_extra[nom_c] = st.number_input(nom_c, value=int(val_prev) if str(val_prev).isdigit() else 0)
-                        elif tipo_c == "Fecha":
-                            e_dict_extra[nom_c] = st.text_input(f"{nom_c} (DD/MM/YYYY):", value=str(val_prev))
-
-                btn_mod = st.form_submit_button("💾 Guardar Cambios del Habitante", type="primary", use_container_width=True)
+        sub_tab1, sub_tab2 = st.tabs(["👥 Editar / Eliminar Habitante", "🛠️ Gestor de Variables Personalizadas"])
+        
+        # --- SUBTAB 1: EDITAR / ELIMINAR HABITANTE ---
+        with sub_tab1:
+            df_edit = cargar_habitantes()
+            if not df_edit.empty:
+                cedula_buscar = st.selectbox("Seleccione el habitante a modificar o eliminar:", df_edit["cedula"].unique())
+                hab = df_edit[df_edit["cedula"] == cedula_buscar].iloc[0]
                 
-                if btn_mod:
-                    if e_cedula.strip() and e_nombres.strip() and e_apellidos.strip():
-                        datos_mod = (
-                            e_cedula.strip(), e_nombres.strip(), e_apellidos.strip(), e_sexo,
-                            e_fn.strftime("%Y-%m-%d"), e_fl.strftime("%Y-%m-%d"),
-                            e_direccion.strip(), e_manzana.strip(), e_telefono.strip(),
-                            e_condicion_salud, e_detalle_salud.strip(), json.dumps(e_dict_extra, ensure_ascii=False)
-                        )
-                        actualizar_habitante_completo(cedula_buscar, datos_mod)
-                        st.success("✅ Datos del habitante actualizados completamente.")
-                        st.rerun()
-                    else:
-                        st.error("⚠️ La cédula, nombres y apellidos no pueden estar vacíos.")
+                try:
+                    dict_dyn = json.loads(hab["campos_adicionales"])
+                except:
+                    dict_dyn = {}
 
-            st.markdown("---")
-            st.markdown("##### 🗑️ Zona de Eliminación")
-            if st.button(f"🗑️ Eliminar Definitivamente a {hab['nombres']} {hab['apellidos']} (Cédula: {hab['cedula']})", type="primary", use_container_width=True):
-                eliminar_habitante(cedula_buscar)
-                st.success("✅ Habitante eliminado de la base de datos.")
-                st.rerun()
+                st.warning(f"Está modificando a: **{hab['nombres']} {hab['apellidos']}** (Cédula actual: `{hab['cedula']}`)")
+
+                tab_e1, tab_e2, tab_e3, tab_e4 = st.tabs(["👤 Datos Personales & Cédula", "🏠 Ubicación", "⚕️ Salud", "➕ Personalizados"])
+
+                with st.form("form_edit_tabs"):
+                    with tab_e1:
+                        st.markdown("##### Modificar Identificación y Datos Personales")
+                        e_cedula = st.text_input("Cédula de Identidad:", value=hab['cedula'])
+                        e_nombres = st.text_input("Nombres:", value=hab['nombres'])
+                        e_apellidos = st.text_input("Apellidos:", value=hab['apellidos'])
+                        
+                        opciones_sexo = ["Femenino", "Masculino", "Otro"]
+                        val_sexo = hab['sexo'] if hab['sexo'] in opciones_sexo else "Femenino"
+                        e_sexo = st.selectbox("Sexo:", opciones_sexo, index=opciones_sexo.index(val_sexo))
+                        e_telefono = st.text_input("Teléfono:", value=hab['telefono'])
+
+                    with tab_e2:
+                        fn_dt = parsear_fecha_bd(hab['fecha_nac'])
+                        fl_dt = parsear_fecha_bd(hab['fecha_llegada'])
+                        
+                        e_fn = st.date_input("Fecha Nacimiento (DD/MM/YYYY):", value=fn_dt, format="DD/MM/YYYY")
+                        e_fl = st.date_input("Fecha Llegada (DD/MM/YYYY):", value=fl_dt, format="DD/MM/YYYY")
+                        e_manzana = st.text_input("Manzana / Sector:", value=hab['manzana'])
+                        e_direccion = st.text_area("Dirección:", value=hab['direccion'])
+
+                    with tab_e3:
+                        opciones_salud = ["Ninguna", "Enfermedad Crónica", "Discapacidad", "Adulto Mayor Encamado", "Embarazada", "Población de Riesgo", "Otra"]
+                        val_salud = hab['condicion_salud'] if hab['condicion_salud'] in opciones_salud else "Ninguna"
+                        e_condicion_salud = st.selectbox("Condición de Salud:", opciones_salud, index=opciones_salud.index(val_salud))
+                        e_detalle_salud = st.text_input("Detalle Médicos:", value=hab['detalle_salud'])
+
+                    with tab_e4:
+                        e_dict_extra = {}
+                        campos_cfg = cargar_campos_personalizados()
+                        for nom_c, tipo_c in campos_cfg:
+                            val_prev = dict_dyn.get(nom_c, "")
+                            if tipo_c == "Texto":
+                                e_dict_extra[nom_c] = st.text_input(nom_c, value=str(val_prev))
+                            elif tipo_c == "Número":
+                                e_dict_extra[nom_c] = st.number_input(nom_c, value=int(val_prev) if str(val_prev).isdigit() else 0)
+                            elif tipo_c == "Fecha":
+                                e_dict_extra[nom_c] = st.text_input(f"{nom_c} (DD/MM/YYYY):", value=str(val_prev))
+
+                    btn_mod = st.form_submit_button("💾 Guardar Cambios del Habitante", type="primary", use_container_width=True)
+                    
+                    if btn_mod:
+                        if e_cedula.strip() and e_nombres.strip() and e_apellidos.strip():
+                            datos_mod = (
+                                e_cedula.strip(), e_nombres.strip(), e_apellidos.strip(), e_sexo,
+                                e_fn.strftime("%Y-%m-%d"), e_fl.strftime("%Y-%m-%d"),
+                                e_direccion.strip(), e_manzana.strip(), e_telefono.strip(),
+                                e_condicion_salud, e_detalle_salud.strip(), json.dumps(e_dict_extra, ensure_ascii=False)
+                            )
+                            actualizar_habitante_completo(cedula_buscar, datos_mod)
+                            st.success("✅ Datos del habitante actualizados completamente.")
+                            st.rerun()
+                        else:
+                            st.error("⚠️ La cédula, nombres y apellidos no pueden estar vacíos.")
+
+                st.markdown("---")
+                st.markdown("##### 🗑️ Zona de Eliminación de Habitante")
+                if st.button(f"🗑️ Eliminar Definitivamente a {hab['nombres']} {hab['apellidos']} (Cédula: {hab['cedula']})", type="primary", use_container_width=True):
+                    eliminar_habitante(cedula_buscar)
+                    st.success("✅ Habitante eliminado de la base de datos.")
+                    st.rerun()
+            else:
+                st.info("No hay habitantes registrados.")
+
+        # --- SUBTAB 2: GESTOR DE VARIABLES PERSONALIZADAS ---
+        with sub_tab2:
+            st.markdown("### 🛠️ Modificar o Eliminar Variables Personalizadas")
+            st.write("Desde aquí puedes cambiar el nombre o **eliminar completamente** cualquier variable personalizada que hayas agregado.")
+            
+            campos_existentes = cargar_campos_personalizados()
+            
+            if campos_existentes:
+                col_v1, col_v2 = st.columns(2)
+                
+                with col_v1:
+                    st.markdown("##### ✏️ Editar Variable Existente")
+                    var_mod = st.selectbox("Seleccionar Variable a Editar:", [c[0] for c in campos_existentes], key="sel_mod_var")
+                    
+                    tipo_actual = [c[1] for c in campos_existentes if c[0] == var_mod][0]
+                    
+                    with st.form("form_edit_var"):
+                        nuevo_nombre_v = st.text_input("Nuevo Nombre de la Variable:", value=var_mod)
+                        opciones_tipo = ["Texto", "Número", "Fecha"]
+                        nuevo_tipo_v = st.selectbox("Nuevo Tipo de Dato:", opciones_tipo, index=opciones_tipo.index(tipo_actual))
+                        
+                        if st.form_submit_button("💾 Guardar Cambios en Variable", use_container_width=True):
+                            if nuevo_nombre_v.strip():
+                                modificar_campo_personalizado(var_mod, nuevo_nombre_v.strip(), nuevo_tipo_v)
+                                st.success(f"✅ Variable '{var_mod}' actualizada a '{nuevo_nombre_v.strip()}'.")
+                                st.rerun()
+                            else:
+                                st.error("El nombre de la variable no puede estar vacío.")
+
+                with col_v2:
+                    st.markdown("##### 🗑️ Eliminar Variable")
+                    var_del = st.selectbox("Seleccionar Variable a Eliminar:", [c[0] for c in campos_existentes], key="sel_del_var")
+                    st.warning(f"⚠️ Al eliminar la variable **'{var_del}'**, esta desaparecerá del formulario y de las fichas de todos los habitantes.")
+                    
+                    if st.button(f"🗑️ Eliminar Variable '{var_del}' Definitivamente", type="primary", use_container_width=True):
+                        eliminar_campo_personalizado(var_del)
+                        st.success(f"✅ La variable '{var_del}' ha sido eliminada.")
+                        st.rerun()
+            else:
+                st.info("No hay variables personalizadas creadas aún.")
 
 # -----------------------------------------------------------------------------
 # TAB: GESTIÓN DE USUARIOS
@@ -798,7 +882,6 @@ if ES_MASTER and "💾 Respaldos e Importación" in pestañas:
 
                         registros_guardados = 0
                         for _, row in df_imp.iterrows():
-                            # Conversión de fecha si viene en texto
                             f_nac_imp = parsear_fecha_bd(row.get("fecha_nacimiento", "")).strftime("%Y-%m-%d")
                             f_lleg_imp = parsear_fecha_bd(row.get("fecha_llegada", "")).strftime("%Y-%m-%d")
 
