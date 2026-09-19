@@ -13,7 +13,6 @@ st.set_page_config(page_title="Censo Comunitario Avanzado", page_icon="🏡", la
 
 DB_FILE = "censo.db"
 
-# Mapeo de nombres de columnas internas de BD <-> Nombres amigables para exportación
 COLUMNAS_ORDENADAS = [
     "cedula",
     "nombre",
@@ -69,7 +68,7 @@ def init_db():
         if col_nombre not in columnas:
             cursor.execute(f"ALTER TABLE habitantes ADD COLUMN {col_nombre} {col_tipo}")
     
-    # Tabla de Usuarios y Roles
+    # Tabla de Usuarios
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             username TEXT PRIMARY KEY,
@@ -79,7 +78,7 @@ def init_db():
         )
     """)
     
-    # Tabla de Bitácora / Historial
+    # Tabla de Bitácora
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS bitacora_documentos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,15 +113,32 @@ def init_db():
 init_db()
 
 # -----------------------------------------------------------------------------
-# 2. FUNCIONES DE BASE DE DATOS
+# 2. FUNCIONES DE BASE DE DATOS Y FORMATO DE FECHA (DD/MM/YYYY)
 # -----------------------------------------------------------------------------
+
+def formato_fecha_pantalla(fecha_str):
+    """Convierte fecha YYYY-MM-DD a DD/MM/YYYY"""
+    try:
+        f = datetime.strptime(str(fecha_str).split()[0], "%Y-%m-%d")
+        return f.strftime("%d/%m/%Y")
+    except:
+        return str(fecha_str)
+
+def parsear_fecha_bd(fecha_str):
+    """Convierte string de fecha a objeto date aceptando YYYY-MM-DD o DD/MM/YYYY"""
+    try:
+        s = str(fecha_str).split()[0]
+        if "/" in s:
+            return datetime.strptime(s, "%d/%m/%Y").date()
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except:
+        return datetime.now().date()
 
 def cargar_habitantes():
     conn = get_connection()
     df = pd.read_sql_query("SELECT * FROM habitantes", conn)
     conn.close()
     
-    # Asegurar valores por defecto en datos cargados
     df["sexo"] = df["sexo"].fillna("No especificado")
     df["condicion_salud"] = df["condicion_salud"].fillna("Ninguna")
     df["detalle_salud"] = df["detalle_salud"].fillna("")
@@ -130,11 +146,13 @@ def cargar_habitantes():
     return df
 
 def obtener_df_exportable(df):
-    """Devuelve un DataFrame adaptado con las columnas solicitadas"""
     if df.empty:
         return pd.DataFrame(columns=COLUMNAS_ORDENADAS)
     
     df_exp = df.copy()
+    df_exp["fecha_nac"] = df_exp["fecha_nac"].apply(formato_fecha_pantalla)
+    df_exp["fecha_llegada"] = df_exp["fecha_llegada"].apply(formato_fecha_pantalla)
+    
     df_exp = df_exp.rename(columns={
         "nombres": "nombre",
         "apellidos": "apellido",
@@ -156,6 +174,28 @@ def guardar_habitante(datos):
             direccion, manzana, telefono, condicion_salud, detalle_salud, campos_adicionales
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, datos)
+    conn.commit()
+    conn.close()
+
+def actualizar_habitante_completo(cedula_original, datos_nuevos):
+    """Permite modificar todos los campos, INCLUYENDO LA CÉDULA."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    nueva_cedula = datos_nuevos[0]
+    
+    # Si la cédula cambió, actualizamos primero la clave primaria y referencias
+    if cedula_original != nueva_cedula:
+        cursor.execute("UPDATE bitacora_documentos SET cedula = ? WHERE cedula = ?", (nueva_cedula, cedula_original))
+        cursor.execute("DELETE FROM habitantes WHERE cedula = ?", (cedula_original,))
+    
+    cursor.execute("""
+        INSERT OR REPLACE INTO habitantes (
+            cedula, nombres, apellidos, sexo, fecha_nac, fecha_llegada, 
+            direccion, manzana, telefono, condicion_salud, detalle_salud, campos_adicionales
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, datos_nuevos)
+    
     conn.commit()
     conn.close()
 
@@ -186,14 +226,7 @@ def agregar_campo_personalizado(nombre, tipo):
         pass
     conn.close()
 
-def eliminar_campo_personalizado(nombre):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM configuracion_campos WHERE nombre_campo = ?", (nombre,))
-    conn.commit()
-    conn.close()
-
-# --- Usuarios y Autenticación ---
+# --- Usuarios y Bitácora ---
 def verificar_login(username, password):
     conn = get_connection()
     cursor = conn.cursor()
@@ -222,7 +255,6 @@ def eliminar_usuario(username):
     conn.commit()
     conn.close()
 
-# --- Bitácora ---
 def registrar_documento(cedula, tipo_doc, descripcion, emitido_por):
     conn = get_connection()
     cursor = conn.cursor()
@@ -256,7 +288,7 @@ def cargar_bitacora(cedula=None):
 # -----------------------------------------------------------------------------
 def calcular_edad(fecha_nac_str):
     try:
-        fecha_nac = datetime.strptime(str(fecha_nac_str).split()[0], "%Y-%m-%d").date()
+        fecha_nac = parsear_fecha_bd(fecha_nac_str)
         hoy = datetime.now().date()
         return hoy.year - fecha_nac.year - ((hoy.month, hoy.day) < (fecha_nac.month, fecha_nac.day))
     except:
@@ -264,7 +296,7 @@ def calcular_edad(fecha_nac_str):
 
 def calcular_tiempo_comunidad(fecha_llegada_str):
     try:
-        fecha_llegada = datetime.strptime(str(fecha_llegada_str).split()[0], "%Y-%m-%d").date()
+        fecha_llegada = parsear_fecha_bd(fecha_llegada_str)
         hoy = datetime.now().date()
         años = hoy.year - fecha_llegada.year
         meses = hoy.month - fecha_llegada.month
@@ -309,7 +341,7 @@ if not st.session_state.autenticado:
     st.stop()
 
 # -----------------------------------------------------------------------------
-# 5. BARRA LATERAL (MENÚ, PERMISOS Y GESTOR DE CAMPOS)
+# 5. BARRA LATERAL
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.title("👤 Perfil de Usuario")
@@ -324,23 +356,19 @@ with st.sidebar:
         
     st.markdown("---")
     
-    # Sección para agregar dynamic fields
     if st.session_state.rol_actual in ["Master", "Administrador"]:
-        st.subheader("➕ Agregar Nueva Pestaña / Campo")
-        nuevo_nom = st.text_input("Nombre de Variable (ej. Ocupación):")
+        st.subheader("➕ Agregar Nueva Variable")
+        nuevo_nom = st.text_input("Nombre de Variable:")
         nuevo_tipo = st.selectbox("Tipo de Dato:", ["Texto", "Número", "Fecha"])
         
-        if st.button("Guardar Nueva Variable", use_container_width=True):
+        if st.button("Guardar Variable", use_container_width=True):
             if nuevo_nom.strip():
                 agregar_campo_personalizado(nuevo_nom.strip(), nuevo_tipo)
-                st.success("Variable agregada con éxito.")
+                st.success("Variable agregada.")
                 st.rerun()
-            else:
-                st.warning("Escriba un nombre válido.")
 
-    st.caption("Sistema de Censo Comunitario v2.5")
+    st.caption("Sistema de Censo Comunitario v3.0")
 
-# Permisos
 ROL = st.session_state.rol_actual
 ES_MASTER = ROL == "Master"
 ES_ADMIN_OR_MASTER = ROL in ["Master", "Administrador"]
@@ -364,13 +392,12 @@ if ES_MASTER:
 tabs = st.tabs(pestañas)
 
 # -----------------------------------------------------------------------------
-# TAB: REGISTRAR HABITANTE (Master, Administrador)
+# TAB: REGISTRAR HABITANTE
 # -----------------------------------------------------------------------------
 if ES_ADMIN_OR_MASTER and "📝 Registrar Habitante" in pestañas:
     with tabs[pestañas.index("📝 Registrar Habitante")]:
         st.subheader("Formulario de Registro de Habitante")
         
-        # Pestañas internas del formulario
         tab_p1, tab_p2, tab_p3, tab_p4 = st.tabs([
             "👤 Datos Personales", 
             "🏠 Ubicación y Vivienda", 
@@ -390,7 +417,8 @@ if ES_ADMIN_OR_MASTER and "📝 Registrar Habitante" in pestañas:
                     apellidos = st.text_input("Apellidos*")
                 with col2:
                     sexo = st.selectbox("Sexo / Género*", ["Femenino", "Masculino", "Otro"])
-                    fecha_nac = st.date_input("Fecha de Nacimiento", min_value=datetime(1920, 1, 1), max_value=datetime.now())
+                    # FORMATO DE FECHA EN PANTALLA: DD/MM/YYYY
+                    fecha_nac = st.date_input("Fecha de Nacimiento (DD/MM/YYYY)", min_value=datetime(1920, 1, 1), max_value=datetime.now(), format="DD/MM/YYYY")
                     telefono = st.text_input("Teléfono de Contacto")
 
             with tab_p2:
@@ -398,7 +426,8 @@ if ES_ADMIN_OR_MASTER and "📝 Registrar Habitante" in pestañas:
                 col3, col4 = st.columns(2)
                 with col3:
                     manzana = st.text_input("Manzana / Sector")
-                    fecha_llegada = st.date_input("Fecha de Llegada a la Comunidad", min_value=datetime(1950, 1, 1), max_value=datetime.now())
+                    # FORMATO DE FECHA EN PANTALLA: DD/MM/YYYY
+                    fecha_llegada = st.date_input("Fecha de Llegada a la Comunidad (DD/MM/YYYY)", min_value=datetime(1950, 1, 1), max_value=datetime.now(), format="DD/MM/YYYY")
                 with col4:
                     direccion = st.text_area("Dirección Detallada de Habitación")
 
@@ -420,9 +449,10 @@ if ES_ADMIN_OR_MASTER and "📝 Registrar Habitante" in pestañas:
                         elif tipo_c == "Número":
                             datos_extra[nom_c] = st.number_input(f"{nom_c}:", value=0)
                         elif tipo_c == "Fecha":
-                            datos_extra[nom_c] = st.date_input(f"{nom_c}:").strftime("%Y-%m-%d")
+                            d_extra = st.date_input(f"{nom_c} (DD/MM/YYYY):", format="DD/MM/YYYY")
+                            datos_extra[nom_c] = d_extra.strftime("%d/%m/%Y")
                 else:
-                    st.info("No hay variables personalizadas configuradas. Puedes agregarlas desde el menú lateral.")
+                    st.info("No hay variables personalizadas configuradas.")
 
             st.markdown("---")
             guardar = st.form_submit_button("💾 Guardar Registro de Habitante", type="primary", use_container_width=True)
@@ -442,7 +472,7 @@ if ES_ADMIN_OR_MASTER and "📝 Registrar Habitante" in pestañas:
                 st.error("⚠️ Ingrese los campos obligatorios marcados con (*).")
 
 # -----------------------------------------------------------------------------
-# TAB: CONSULTAR Y FILTROS (Todos)
+# TAB: CONSULTAR Y FILTROS
 # -----------------------------------------------------------------------------
 with tabs[pestañas.index("📊 Consultar y Filtros")]:
     st.subheader("Consulta General de Habitantes")
@@ -452,17 +482,22 @@ with tabs[pestañas.index("📊 Consultar y Filtros")]:
         df["Edad"] = df["fecha_nac"].apply(calcular_edad)
         df["Tiempo Comunidad"] = df["fecha_llegada"].apply(calcular_tiempo_comunidad)
         
+        # Formatear fechas para visualizar en tabla (DD/MM/YYYY)
+        df_pantalla = df.copy()
+        df_pantalla["fecha_nac"] = df_pantalla["fecha_nac"].apply(formato_fecha_pantalla)
+        df_pantalla["fecha_llegada"] = df_pantalla["fecha_llegada"].apply(formato_fecha_pantalla)
+        
         col_f1, col_f2, col_f3, col_f4 = st.columns(4)
         with col_f1:
             busqueda = st.text_input("Buscar por Nombre, Apellido o Cédula")
         with col_f2:
-            sector_sel = st.selectbox("Manzana / Sector", ["Todos"] + list(df["manzana"].dropna().unique()))
+            sector_sel = st.selectbox("Manzana / Sector", ["Todos"] + list(df_pantalla["manzana"].dropna().unique()))
         with col_f3:
-            sexo_sel = st.selectbox("Filtrar por Sexo", ["Todos"] + list(df["sexo"].dropna().unique()))
+            sexo_sel = st.selectbox("Filtrar por Sexo", ["Todos"] + list(df_pantalla["sexo"].dropna().unique()))
         with col_f4:
-            salud_sel = st.selectbox("Filtrar por Salud", ["Todos"] + list(df["condicion_salud"].dropna().unique()))
+            salud_sel = st.selectbox("Filtrar por Salud", ["Todos"] + list(df_pantalla["condicion_salud"].dropna().unique()))
 
-        df_filtrado = df.copy()
+        df_filtrado = df_pantalla.copy()
         if busqueda:
             df_filtrado = df_filtrado[
                 df_filtrado["nombres"].str.contains(busqueda, case=False, na=False) |
@@ -476,7 +511,6 @@ with tabs[pestañas.index("📊 Consultar y Filtros")]:
         if salud_sel != "Todos":
             df_filtrado = df_filtrado[df_filtrado["condicion_salud"] == salud_sel]
 
-        # Métricas
         st.markdown("---")
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Total Personas", len(df_filtrado))
@@ -492,28 +526,18 @@ with tabs[pestañas.index("📊 Consultar y Filtros")]:
         col_exp1, col_exp2 = st.columns(2)
         with col_exp1:
             csv_data = df_exp_filtrado.to_csv(index=False, sep=";", encoding="utf-8-sig")
-            st.download_button(
-                label="📥 Exportar Tabla Actual (CSV por Columnas)",
-                data=csv_data,
-                file_name="censo_filtrado.csv",
-                mime="text/csv"
-            )
+            st.download_button("📥 Exportar Tabla (CSV)", csv_data, "censo_filtrado.csv", "text/csv")
         with col_exp2:
             buffer_exc = io.BytesIO()
             with pd.ExcelWriter(buffer_exc, engine='openpyxl') as writer:
                 df_exp_filtrado.to_excel(writer, index=False, sheet_name="Habitantes")
             
-            st.download_button(
-                label="📊 Exportar Tabla Actual (Excel)",
-                data=buffer_exc.getvalue(),
-                file_name="censo_filtrado.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            st.download_button("📊 Exportar Tabla (Excel)", buffer_exc.getvalue(), "censo_filtrado.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     else:
         st.info("No hay habitantes cargados en la base de datos.")
 
 # -----------------------------------------------------------------------------
-# TAB: ESTADÍSTICAS Y GRÁFICOS (Todos)
+# TAB: ESTADÍSTICAS Y GRÁFICOS
 # -----------------------------------------------------------------------------
 with tabs[pestañas.index("📈 Estadísticas (Gráficos)")]:
     st.subheader("Análisis Demográfico y Condiciones de Salud")
@@ -526,33 +550,18 @@ with tabs[pestañas.index("📈 Estadísticas (Gráficos)")]:
         min_e, max_e = int(df_stat["Edad"].min()), int(df_stat["Edad"].max())
         max_e = max_e if max_e > min_e else min_e + 1
         
-        rango_edad = st.slider("Selecciona el Rango de Edad que deseas analizar:", min_value=0, max_value=100, value=(min_e, max_e))
+        rango_edad = st.slider("Selecciona el Rango de Edad:", min_value=0, max_value=100, value=(min_e, max_e))
         df_range = df_stat[(df_stat["Edad"] >= rango_edad[0]) & (df_stat["Edad"] <= rango_edad[1])]
-        
-        st.write(f"Mostrando **{len(df_range)}** personas registradas.")
         
         if not df_range.empty:
             col_g1, col_g2 = st.columns(2)
-            
             with col_g1:
-                fig_sexo = px.pie(
-                    df_range, 
-                    names="sexo", 
-                    title="Distribución por Sexo",
-                    hole=0.4,
-                    color_discrete_sequence=px.colors.qualitative.Set2
-                )
+                fig_sexo = px.pie(df_range, names="sexo", title="Distribución por Sexo", hole=0.4, color_discrete_sequence=px.colors.qualitative.Set2)
                 fig_sexo.update_traces(textinfo="percent+label+value")
                 st.plotly_chart(fig_sexo, use_container_width=True)
                 
             with col_g2:
-                fig_salud = px.pie(
-                    df_range, 
-                    names="condicion_salud", 
-                    title="Distribución por Condiciones de Salud",
-                    hole=0.4,
-                    color_discrete_sequence=px.colors.qualitative.Pastel
-                )
+                fig_salud = px.pie(df_range, names="condicion_salud", title="Distribución por Salud", hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
                 fig_salud.update_traces(textinfo="percent+label+value")
                 st.plotly_chart(fig_salud, use_container_width=True)
         else:
@@ -561,7 +570,7 @@ with tabs[pestañas.index("📈 Estadísticas (Gráficos)")]:
         st.info("No hay datos para generar estadísticas.")
 
 # -----------------------------------------------------------------------------
-# TAB: BITÁCORA DE DOCUMENTOS (Master, Administrador)
+# TAB: BITÁCORA DE DOCUMENTOS
 # -----------------------------------------------------------------------------
 if ES_ADMIN_OR_MASTER and "📄 Bitácora de Documentos" in pestañas:
     with tabs[pestañas.index("📄 Bitácora de Documentos")]:
@@ -608,49 +617,54 @@ if ES_ADMIN_OR_MASTER and "📄 Bitácora de Documentos" in pestañas:
             st.info("Debe registrar habitantes primero.")
 
 # -----------------------------------------------------------------------------
-# TAB: EDITAR / ELIMINAR REGISTROS (Master, Administrador)
+# TAB: EDITAR / ELIMINAR REGISTROS (EDICIÓN COMPLETA DE CÉDULA Y CAMPOS)
 # -----------------------------------------------------------------------------
 if ES_ADMIN_OR_MASTER and "⚙️ Editar / Eliminar" in pestañas:
     with tabs[pestañas.index("⚙️ Editar / Eliminar")]:
-        st.subheader("Modificar / Actualizar Habitantes")
+        st.subheader("⚙️ Modificación Total y Eliminación de Registros")
         df_edit = cargar_habitantes()
         
         if not df_edit.empty:
-            cedula_buscar = st.selectbox("Seleccione Cédula del habitante:", df_edit["cedula"].unique())
+            cedula_buscar = st.selectbox("Seleccione el habitante a modificar o eliminar:", df_edit["cedula"].unique())
             hab = df_edit[df_edit["cedula"] == cedula_buscar].iloc[0]
             
-            # Cargar datos JSON dinámicos si existen
             try:
                 dict_dyn = json.loads(hab["campos_adicionales"])
             except:
                 dict_dyn = {}
 
-            tab_e1, tab_e2, tab_e3, tab_e4 = st.tabs(["👤 Datos Personales", "🏠 Ubicación", "⚕️ Salud", "➕ Personalizados"])
+            st.warning(f"Está modificando a: **{hab['nombres']} {hab['apellidos']}** (Cédula actual: `{hab['cedula']}`)")
+
+            tab_e1, tab_e2, tab_e3, tab_e4 = st.tabs(["👤 Datos Personales & Cédula", "🏠 Ubicación", "⚕️ Salud", "➕ Personalizados"])
 
             with st.form("form_edit_tabs"):
                 with tab_e1:
-                    e_nombres = st.text_input("Nombres", value=hab['nombres'])
-                    e_apellidos = st.text_input("Apellidos", value=hab['apellidos'])
+                    st.markdown("##### Modificar Identificación y Datos Personales")
+                    # ¡AQUÍ MISMOS PUEDES EDITAR LA CÉDULA!
+                    e_cedula = st.text_input("Cédula de Identidad (Módifquela si es necesario):", value=hab['cedula'])
+                    e_nombres = st.text_input("Nombres:", value=hab['nombres'])
+                    e_apellidos = st.text_input("Apellidos:", value=hab['apellidos'])
                     
                     opciones_sexo = ["Femenino", "Masculino", "Otro"]
                     val_sexo = hab['sexo'] if hab['sexo'] in opciones_sexo else "Femenino"
-                    e_sexo = st.selectbox("Sexo", opciones_sexo, index=opciones_sexo.index(val_sexo))
-                    e_telefono = st.text_input("Teléfono", value=hab['telefono'])
+                    e_sexo = st.selectbox("Sexo:", opciones_sexo, index=opciones_sexo.index(val_sexo))
+                    e_telefono = st.text_input("Teléfono:", value=hab['telefono'])
 
                 with tab_e2:
-                    fn_dt = datetime.strptime(str(hab['fecha_nac']).split()[0], "%Y-%m-%d").date()
-                    fl_dt = datetime.strptime(str(hab['fecha_llegada']).split()[0], "%Y-%m-%d").date()
+                    fn_dt = parsear_fecha_bd(hab['fecha_nac'])
+                    fl_dt = parsear_fecha_bd(hab['fecha_llegada'])
                     
-                    e_fn = st.date_input("Fecha Nacimiento", value=fn_dt)
-                    e_fl = st.date_input("Fecha Llegada", value=fl_dt)
-                    e_manzana = st.text_input("Manzana / Sector", value=hab['manzana'])
-                    e_direccion = st.text_area("Dirección", value=hab['direccion'])
+                    # FORMATO DE FECHA EN PANTALLA: DD/MM/YYYY
+                    e_fn = st.date_input("Fecha Nacimiento (DD/MM/YYYY):", value=fn_dt, format="DD/MM/YYYY")
+                    e_fl = st.date_input("Fecha Llegada (DD/MM/YYYY):", value=fl_dt, format="DD/MM/YYYY")
+                    e_manzana = st.text_input("Manzana / Sector:", value=hab['manzana'])
+                    e_direccion = st.text_area("Dirección:", value=hab['direccion'])
 
                 with tab_e3:
                     opciones_salud = ["Ninguna", "Enfermedad Crónica", "Discapacidad", "Adulto Mayor Encamado", "Embarazada", "Población de Riesgo", "Otra"]
                     val_salud = hab['condicion_salud'] if hab['condicion_salud'] in opciones_salud else "Ninguna"
-                    e_condicion_salud = st.selectbox("Condición de Salud", opciones_salud, index=opciones_salud.index(val_salud))
-                    e_detalle_salud = st.text_input("Detalle Médicos", value=hab['detalle_salud'])
+                    e_condicion_salud = st.selectbox("Condición de Salud:", opciones_salud, index=opciones_salud.index(val_salud))
+                    e_detalle_salud = st.text_input("Detalle Médicos:", value=hab['detalle_salud'])
 
                 with tab_e4:
                     e_dict_extra = {}
@@ -662,29 +676,33 @@ if ES_ADMIN_OR_MASTER and "⚙️ Editar / Eliminar" in pestañas:
                         elif tipo_c == "Número":
                             e_dict_extra[nom_c] = st.number_input(nom_c, value=int(val_prev) if str(val_prev).isdigit() else 0)
                         elif tipo_c == "Fecha":
-                            e_dict_extra[nom_c] = st.text_input(f"{nom_c} (YYYY-MM-DD)", value=str(val_prev))
+                            e_dict_extra[nom_c] = st.text_input(f"{nom_c} (DD/MM/YYYY):", value=str(val_prev))
 
-                btn_mod = st.form_submit_button("💾 Actualizar Habitante", type="primary", use_container_width=True)
+                btn_mod = st.form_submit_button("💾 Guardar Cambios del Habitante", type="primary", use_container_width=True)
                 
                 if btn_mod:
-                    datos_mod = (
-                        cedula_buscar, e_nombres, e_apellidos, e_sexo,
-                        e_fn.strftime("%Y-%m-%d"), e_fl.strftime("%Y-%m-%d"),
-                        e_direccion, e_manzana, e_telefono,
-                        e_condicion_salud, e_detalle_salud, json.dumps(e_dict_extra, ensure_ascii=False)
-                    )
-                    guardar_habitante(datos_mod)
-                    st.success("✅ Registro actualizado.")
-                    st.rerun()
+                    if e_cedula.strip() and e_nombres.strip() and e_apellidos.strip():
+                        datos_mod = (
+                            e_cedula.strip(), e_nombres.strip(), e_apellidos.strip(), e_sexo,
+                            e_fn.strftime("%Y-%m-%d"), e_fl.strftime("%Y-%m-%d"),
+                            e_direccion.strip(), e_manzana.strip(), e_telefono.strip(),
+                            e_condicion_salud, e_detalle_salud.strip(), json.dumps(e_dict_extra, ensure_ascii=False)
+                        )
+                        actualizar_habitante_completo(cedula_buscar, datos_mod)
+                        st.success("✅ Datos del habitante actualizados completamente.")
+                        st.rerun()
+                    else:
+                        st.error("⚠️ La cédula, nombres y apellidos no pueden estar vacíos.")
 
             st.markdown("---")
-            if st.button(f"🗑️ Eliminar a {hab['nombres']} {hab['apellidos']}", type="primary"):
+            st.markdown("##### 🗑️ Zona de Eliminación")
+            if st.button(f"🗑️ Eliminar Definitivamente a {hab['nombres']} {hab['apellidos']} (Cédula: {hab['cedula']})", type="primary", use_container_width=True):
                 eliminar_habitante(cedula_buscar)
-                st.warning("Registro eliminado con éxito.")
+                st.success("✅ Habitante eliminado de la base de datos.")
                 st.rerun()
 
 # -----------------------------------------------------------------------------
-# TAB: GESTIÓN DE USUARIOS (Solo Master)
+# TAB: GESTIÓN DE USUARIOS
 # -----------------------------------------------------------------------------
 if ES_MASTER and "👥 Gestión de Usuarios" in pestañas:
     with tabs[pestañas.index("👥 Gestión de Usuarios")]:
@@ -705,7 +723,7 @@ if ES_MASTER and "👥 Gestión de Usuarios" in pestañas:
                 if btn_save_user:
                     if u_user.strip() and u_pass.strip():
                         guardar_usuario(u_user.strip(), u_pass.strip(), u_name.strip(), u_rol)
-                        st.success(f"✅ Usuario `{u_user}` guardado correctamente.")
+                        st.success(f"✅ Usuario `{u_user}` guardado.")
                         st.rerun()
                     else:
                         st.error("Ingrese usuario y contraseña.")
@@ -723,7 +741,7 @@ if ES_MASTER and "👥 Gestión de Usuarios" in pestañas:
                 st.rerun()
 
 # -----------------------------------------------------------------------------
-# TAB: RESPALDOS E IMPORTACIÓN (Solo Master)
+# TAB: RESPALDOS E IMPORTACIÓN
 # -----------------------------------------------------------------------------
 if ES_MASTER and "💾 Respaldos e Importación" in pestañas:
     with tabs[pestañas.index("💾 Respaldos e Importación")]:
@@ -780,13 +798,17 @@ if ES_MASTER and "💾 Respaldos e Importación" in pestañas:
 
                         registros_guardados = 0
                         for _, row in df_imp.iterrows():
+                            # Conversión de fecha si viene en texto
+                            f_nac_imp = parsear_fecha_bd(row.get("fecha_nacimiento", "")).strftime("%Y-%m-%d")
+                            f_lleg_imp = parsear_fecha_bd(row.get("fecha_llegada", "")).strftime("%Y-%m-%d")
+
                             guardar_habitante((
                                 str(row.get("cedula", "")).strip(),
                                 str(row.get("nombre", "")).strip(),
                                 str(row.get("apellido", "")).strip(),
                                 str(row.get("sexo", "No especificado")).strip(),
-                                str(row.get("fecha_nacimiento", "")).strip(),
-                                str(row.get("fecha_llegada", "")).strip(),
+                                f_nac_imp,
+                                f_lleg_imp,
                                 str(row.get("direccion", "")).strip(),
                                 str(row.get("manzana", "")).strip(),
                                 str(row.get("telefono", "")).strip(),
