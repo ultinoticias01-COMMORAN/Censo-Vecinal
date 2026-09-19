@@ -431,7 +431,7 @@ with st.sidebar:
                 st.success("Variable creada con éxito.")
                 st.rerun()
 
-    st.caption("Sistema de Censo Comunitario v5.2")
+    st.caption("Sistema de Censo Comunitario v5.3")
 
 # -----------------------------------------------------------------------------
 # 6. NAVEGACIÓN Y PESTAÑAS DINÁMICAS
@@ -463,39 +463,135 @@ if not pestañas:
 tabs = st.tabs(pestañas)
 
 # -----------------------------------------------------------------------------
-# TAB: CONSULTAR Y FILTROS (CON EDAD Y TIEMPO EN LA COMUNIDAD)
+# TAB: CONSULTAR Y FILTROS (DISEÑO VISUAL REDISEÑADO)
 # -----------------------------------------------------------------------------
 if "📊 Consultar y Filtros" in pestañas:
     with tabs[pestañas.index("📊 Consultar y Filtros")]:
-        st.subheader("📊 Consulta General y Filtros del Censo")
+        st.subheader("📊 Consulta e Información Detallada de Habitantes")
         df = cargar_habitantes()
         
         if not df.empty:
-            # Cálculo dinámico de EDAD y TIEMPO EN LA COMUNIDAD
-            df["Edad"] = df["fecha_nac"].apply(calcular_edad)
-            df["Años en la Comunidad"] = df["fecha_llegada"].apply(calcular_tiempo_comunidad)
+            df["edad_num"] = df["fecha_nac"].apply(calcular_edad)
+            df["tiempo_comunidad_num"] = df["fecha_llegada"].apply(calcular_tiempo_comunidad)
             
-            df_pantalla = df.copy()
-            df_pantalla["fecha_nac"] = df_pantalla["fecha_nac"].apply(formato_fecha_pantalla)
-            df_pantalla["fecha_llegada"] = df_pantalla["fecha_llegada"].apply(formato_fecha_pantalla)
-            
-            # Reorganizar columnas principales
-            columnas_ordenadas = [
-                "cedula", "nombres", "apellidos", "sexo", "Edad", "fecha_nac",
-                "Años en la Comunidad", "fecha_llegada", "manzana", "direccion",
-                "telefono", "condicion_salud", "detalle_salud"
-            ]
-            
-            renombrar_dic = {clave: cfg_campos.get(clave, {}).get("etiqueta", clave) for clave in CAMPOS_BASE_DEFAULT.keys()}
-            df_pantalla = df_pantalla[columnas_ordenadas].rename(columns=renombrar_dic)
+            # Buscador principal
+            col_search1, col_search2 = st.columns([3, 1])
+            with col_search1:
+                busqueda = st.text_input("🔍 Buscar por Cédula, Nombre, Apellido o Manzana:", placeholder="Escriba para buscar...")
+            with col_search2:
+                vista_modo = st.radio("Modo de vista:", ["Tarjetas Visuales", "Tabla Resumida"], horizontal=True)
 
-            busqueda = st.text_input("🔍 Buscar por cédula, nombre, manzana...")
-            if busqueda:
-                df_pantalla = df_pantalla[df_pantalla.astype(str).apply(lambda x: x.str.contains(busqueda, case=False)).any(axis=1)]
+            if busqueda.strip():
+                df_filtrado = df[df.astype(str).apply(lambda x: x.str.contains(busqueda, case=False)).any(axis=1)]
+            else:
+                df_filtrado = df.copy()
 
-            st.dataframe(df_pantalla, use_container_width=True, hide_index=True)
+            st.caption(f"Mostrando {len(df_filtrado)} habitantes encontrados.")
+
+            if vista_modo == "Tarjetas Visuales":
+                for idx, hab in df_filtrado.iterrows():
+                    cedula_curr = hab["cedula"]
+                    nombre_completo = f"{hab['nombres']} {hab['apellidos']}"
+                    
+                    with st.expander(f"👤 **{nombre_completo}** — Cédula: `{cedula_curr}` | Manzana: {hab['manzana']}", expanded=bool(busqueda.strip())):
+                        
+                        # Indicadores Clave Visuales
+                        kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+                        kpi1.metric("🎂 Edad", f"{hab['edad_num']} años")
+                        kpi2.metric("🏠 Tiempo Comunidad", f"{hab['tiempo_comunidad_num']} años")
+                        kpi3.metric("👫 Sexo", hab['sexo'])
+                        kpi4.metric("📞 Teléfono", hab['telefono'] if hab['telefono'] else "Sin datos")
+                        kpi5.metric("🏘️ Manzana / Sector", hab['manzana'])
+
+                        st.markdown("---")
+                        
+                        # Detalle en dos columnas
+                        col_info1, col_info2 = st.columns(2)
+                        with col_info1:
+                            st.markdown("##### 📌 Datos Personales y Habitación")
+                            st.write(f"**Fecha de Nacimiento:** {formato_fecha_pantalla(hab['fecha_nac'])}")
+                            st.write(f"**Fecha de Llegada:** {formato_fecha_pantalla(hab['fecha_llegada'])}")
+                            st.write(f"**Dirección Detallada:** {hab['direccion']}")
+
+                        with col_info2:
+                            st.markdown("##### ⚕️ Salud y Variables Adicionales")
+                            st.write(f"**Condición de Salud:** {hab['condicion_salud']}")
+                            if hab['detalle_salud']:
+                                st.write(f"**Detalle Salud:** {hab['detalle_salud']}")
+                            
+                            # Mostrar Variables Adicionales
+                            try:
+                                extras = json.loads(hab['campos_adicionales'])
+                                if extras:
+                                    st.markdown("**Variables Adicionales:**")
+                                    for k_ext, v_ext in extras.items():
+                                        st.write(f"- *{k_ext}:* {v_ext}")
+                            except:
+                                pass
+
+                        st.markdown("---")
+                        
+                        # Botones de Acción Directos
+                        btn_col1, btn_col2, _ = st.columns([1, 1, 3])
+                        
+                        if tiene_permiso("editar_habitantes"):
+                            with btn_col1:
+                                if st.button(f"✏️ Editar Datos", key=f"btn_edit_{cedula_curr}", use_container_width=True):
+                                    st.session_state[f"modo_edit_{cedula_curr}"] = not st.session_state.get(f"modo_edit_{cedula_curr}", False)
+
+                        if tiene_permiso("eliminar_habitantes"):
+                            with btn_col2:
+                                if st.button(f"🗑️ Eliminar Registro", key=f"btn_del_{cedula_curr}", type="primary", use_container_width=True):
+                                    eliminar_habitante(cedula_curr)
+                                    st.success(f"Habitante con cédula {cedula_curr} eliminado.")
+                                    st.rerun()
+
+                        # Formulario In-Situ para Editar Datos si se presiona "✏️ Editar Datos"
+                        if st.session_state.get(f"modo_edit_{cedula_curr}", False):
+                            st.markdown("---")
+                            st.subheader(f"🛠️ Editar Datos de {nombre_completo}")
+                            
+                            with st.form(key=f"form_insitu_edit_{cedula_curr}"):
+                                col_ins1, col_ins2 = st.columns(2)
+                                with col_ins1:
+                                    e_ced = st.text_input("Cédula:", value=hab['cedula'])
+                                    e_nom = st.text_input("Nombres:", value=hab['nombres'])
+                                    e_ape = st.text_input("Apellidos:", value=hab['apellidos'])
+                                    e_tel = st.text_input("Teléfono:", value=hab['telefono'])
+                                with col_ins2:
+                                    e_sex = st.selectbox("Sexo:", ["Femenino", "Masculino", "Otro"], index=0 if hab['sexo']=="Femenino" else (1 if hab['sexo']=="Masculino" else 2))
+                                    e_fn = st.date_input("Fecha Nacimiento:", value=parsear_fecha_bd(hab['fecha_nac']), min_value=datetime(1900, 1, 1), format="DD/MM/YYYY")
+                                    e_fl = st.date_input("Fecha Llegada:", value=parsear_fecha_bd(hab['fecha_llegada']), min_value=datetime(1900, 1, 1), format="DD/MM/YYYY")
+                                
+                                e_man = st.text_input("Manzana:", value=hab['manzana'])
+                                e_dir = st.text_area("Dirección:", value=hab['direccion'])
+                                e_sal = st.text_input("Condición Salud:", value=hab['condicion_salud'])
+                                e_detsal = st.text_input("Detalle Salud:", value=hab['detalle_salud'])
+                                
+                                if st.form_submit_button("💾 Guardar Cambios", type="primary", use_container_width=True):
+                                    datos_actualizados = (
+                                        e_ced.strip(), e_nom.strip(), e_ape.strip(), e_sex,
+                                        e_fn.strftime("%Y-%m-%d"), e_fl.strftime("%Y-%m-%d"),
+                                        e_dir.strip(), e_man.strip(), e_tel.strip(),
+                                        e_sal.strip(), e_detsal.strip(), hab['campos_adicionales']
+                                    )
+                                    actualizar_habitante_completo(cedula_curr, datos_actualizados)
+                                    st.session_state[f"modo_edit_{cedula_curr}"] = False
+                                    st.success("✅ Cambios guardados correctamente.")
+                                    st.rerun()
+
+            else:
+                # VISTA TABULAR COMPACTA
+                df_tabla = df_filtrado.copy()
+                df_tabla["Edad"] = df_tabla["edad_num"]
+                df_tabla["Años Comunidad"] = df_tabla["tiempo_comunidad_num"]
+                df_tabla["fecha_nac"] = df_tabla["fecha_nac"].apply(formato_fecha_pantalla)
+                df_tabla["fecha_llegada"] = df_tabla["fecha_llegada"].apply(formato_fecha_pantalla)
+                
+                cols_mostrar = ["cedula", "nombres", "apellidos", "sexo", "Edad", "Años Comunidad", "manzana", "telefono", "condicion_salud"]
+                st.dataframe(df_tabla[cols_mostrar], use_container_width=True, hide_index=True)
         else:
-            st.info("No hay registros cargados.")
+            st.info("No hay registros cargados en la base de datos.")
 
 # -----------------------------------------------------------------------------
 # TAB: BITÁCORA DE DOCUMENTOS (CONSTANCIAS / CARTAS)
