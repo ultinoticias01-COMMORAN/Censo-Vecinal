@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
+import io
 
 # -----------------------------------------------------------------------------
 # 1. CONFIGURACIÓN DE PÁGINA Y BASE DE DATOS
@@ -10,6 +11,19 @@ from datetime import datetime
 st.set_page_config(page_title="Censo Comunitario Avanzado", page_icon="🏡", layout="wide")
 
 DB_FILE = "censo.db"
+
+# Mapeo de nombres de columnas internas de BD <-> Nombres amigables/orden de importación y exportación
+COLUMNAS_ORDENADAS = [
+    "cedula",
+    "nombre",
+    "apellido",
+    "fecha_nacimiento",
+    "fecha_llegada",
+    "direccion",
+    "manzana",
+    "telefono",
+    "sexo"
+]
 
 def get_connection():
     return sqlite3.connect(DB_FILE)
@@ -86,6 +100,26 @@ def cargar_habitantes():
         df["sexo"] = "No especificado"
     df["sexo"] = df["sexo"].fillna("No especificado")
     return df
+
+def obtener_df_exportable(df):
+    """Devuelve un DataFrame adaptado con las columnas en el orden solicitado"""
+    if df.empty:
+        return pd.DataFrame(columns=COLUMNAS_ORDENADAS)
+    
+    df_exp = df.copy()
+    # Renombrar columnas para que coincidan con la estructura solicitada
+    df_exp = df_exp.rename(columns={
+        "nombres": "nombre",
+        "apellidos": "apellido",
+        "fecha_nac": "fecha_nacimiento"
+    })
+    
+    # Asegurar que existan todas las columnas
+    for col in COLUMNAS_ORDENADAS:
+        if col not in df_exp.columns:
+            df_exp[col] = ""
+            
+    return df_exp[COLUMNAS_ORDENADAS]
 
 def guardar_habitante(datos):
     conn = get_connection()
@@ -168,7 +202,7 @@ def cargar_bitacora(cedula=None):
 # -----------------------------------------------------------------------------
 def calcular_edad(fecha_nac_str):
     try:
-        fecha_nac = datetime.strptime(fecha_nac_str, "%Y-%m-%d").date()
+        fecha_nac = datetime.strptime(str(fecha_nac_str).split()[0], "%Y-%m-%d").date()
         hoy = datetime.now().date()
         return hoy.year - fecha_nac.year - ((hoy.month, hoy.day) < (fecha_nac.month, fecha_nac.day))
     except:
@@ -176,7 +210,7 @@ def calcular_edad(fecha_nac_str):
 
 def calcular_tiempo_comunidad(fecha_llegada_str):
     try:
-        fecha_llegada = datetime.strptime(fecha_llegada_str, "%Y-%m-%d").date()
+        fecha_llegada = datetime.strptime(str(fecha_llegada_str).split()[0], "%Y-%m-%d").date()
         hoy = datetime.now().date()
         años = hoy.year - fecha_llegada.year
         meses = hoy.month - fecha_llegada.month
@@ -337,9 +371,31 @@ with tabs[pestañas.index("📊 Consultar y Filtros")]:
 
         st.dataframe(df_filtrado, use_container_width=True, hide_index=True)
         
-        # Exportar vista filtrada
-        csv = df_filtrado.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Exportar Tabla Actual (CSV)", csv, "censo_filtrado.csv", "text/csv")
+        # Preparar datos ordenados por columnas
+        df_exp_filtrado = obtener_df_exportable(df_filtrado)
+        
+        col_exp1, col_exp2 = st.columns(2)
+        with col_exp1:
+            # Exportar CSV ordenado por columnas (delimitado por ;)
+            csv_data = df_exp_filtrado.to_csv(index=False, sep=";", encoding="utf-8-sig")
+            st.download_button(
+                label="📥 Exportar Tabla Actual (CSV por Columnas)",
+                data=csv_data,
+                file_name="censo_filtrado.csv",
+                mime="text/csv"
+            )
+        with col_exp2:
+            # Exportar Excel (.xlsx)
+            buffer_exc = io.BytesIO()
+            with pd.ExcelWriter(buffer_exc, engine='openpyxl') as writer:
+                df_exp_filtrado.to_excel(writer, index=False, sheet_name="Habitantes")
+            
+            st.download_button(
+                label="📊 Exportar Tabla Actual (Excel)",
+                data=buffer_exc.getvalue(),
+                file_name="censo_filtrado.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
     else:
         st.info("No hay datos en el censo.")
 
@@ -464,8 +520,8 @@ if ES_ADMIN_OR_MASTER and "⚙️ Editar / Eliminar" in pestañas:
                     
                     e_telefono = st.text_input("Teléfono", value=hab['telefono'])
                 with col_e2:
-                    fn_dt = datetime.strptime(hab['fecha_nac'], "%Y-%m-%d").date()
-                    fl_dt = datetime.strptime(hab['fecha_llegada'], "%Y-%m-%d").date()
+                    fn_dt = datetime.strptime(str(hab['fecha_nac']).split()[0], "%Y-%m-%d").date()
+                    fl_dt = datetime.strptime(str(hab['fecha_llegada']).split()[0], "%Y-%m-%d").date()
                     
                     e_fn = st.date_input("Fecha Nacimiento", value=fn_dt)
                     e_fl = st.date_input("Fecha Llegada", value=fl_dt)
@@ -539,21 +595,92 @@ if ES_MASTER and "💾 Respaldos e Importación" in pestañas:
         col_db1, col_db2 = st.columns(2)
         
         with col_db1:
-            st.markdown("### 📤 Exportar / Descargar Datos")
+            st.markdown("### 📤 Exportar Habitantes")
             
+            df_exp_full = obtener_df_exportable(cargar_habitantes())
+            
+            # Exportar CSV ordenado por columnas
+            csv_exp_full = df_exp_full.to_csv(index=False, sep=";", encoding="utf-8-sig")
+            st.download_button("📥 Descargar Censo Completo (CSV por Columnas)", csv_exp_full, "habitantes.csv", "text/csv")
+            
+            # Exportar Excel (.xlsx)
+            buffer_full = io.BytesIO()
+            with pd.ExcelWriter(buffer_full, engine='openpyxl') as writer:
+                df_exp_full.to_excel(writer, index=False, sheet_name="Habitantes")
+                
+            st.download_button(
+                "📊 Descargar Censo Completo (Excel .xlsx)",
+                buffer_full.getvalue(),
+                "habitantes.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+            st.markdown("---")
+            st.markdown("### 💾 Respaldo de Base de Datos")
             with open(DB_FILE, "rb") as f:
                 bytes_db = f.read()
             st.download_button("💾 Descargar Base de Datos Completa (.db)", bytes_db, "censo_backup.db", "application/octet-stream")
-            
-            st.markdown("---")
-            df_exp = cargar_habitantes()
-            csv_exp = df_exp.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Descargar Censo Completo (CSV)", csv_exp, "habitantes.csv", "text/csv")
-            
+
         with col_db2:
-            st.markdown("### 📥 Importar Datos")
+            st.markdown("### 📥 Importar Habitantes (CSV o Excel)")
             
-            st.markdown("#### 1. Reemplazar Base de Datos (.db)")
+            uploaded_file = st.file_uploader("Subir archivo de habitantes", type=["csv", "xlsx"])
+            if uploaded_file is not None:
+                if st.button("📥 Importar Habitantes al Sistema"):
+                    try:
+                        # Detección del tipo de archivo
+                        if uploaded_file.name.endswith(".xlsx"):
+                            df_imp = pd.read_excel(uploaded_file)
+                        else:
+                            # Intenta leer separado por punto y coma o coma
+                            try:
+                                df_imp = pd.read_csv(uploaded_file, sep=";", encoding="utf-8-sig")
+                                if len(df_imp.columns) <= 1:
+                                    uploaded_file.seek(0)
+                                    df_imp = pd.read_csv(uploaded_file, sep=",")
+                            except:
+                                uploaded_file.seek(0)
+                                df_imp = pd.read_csv(uploaded_file, sep=",")
+
+                        # Normalizar nombres de columnas a minúsculas y sin espacios extras
+                        df_imp.columns = [str(col).strip().lower() for col in df_imp.columns]
+                        
+                        # Mapear variaciones de nombres de columnas
+                        renombres = {
+                            "nombres": "nombre",
+                            "apellidos": "apellido",
+                            "fecha_nac": "fecha_nacimiento"
+                        }
+                        df_imp = df_imp.rename(columns=renombres)
+
+                        # Verificar presencia de columnas requeridas
+                        columnas_faltantes = [c for c in COLUMNAS_ORDENADAS if c not in df_imp.columns]
+
+                        if not columnas_faltantes:
+                            registros_guardados = 0
+                            for _, row in df_imp.iterrows():
+                                guardar_habitante((
+                                    str(row["cedula"]).strip(),
+                                    str(row["nombre"]).strip(),
+                                    str(row["apellido"]).strip(),
+                                    str(row["sexo"]).strip(),
+                                    str(row["fecha_nacimiento"]).strip(),
+                                    str(row["fecha_llegada"]).strip(),
+                                    str(row["direccion"]).strip(),
+                                    str(row["manzana"]).strip(),
+                                    str(row["telefono"]).strip()
+                                ))
+                                registros_guardados += 1
+                            st.success(f"✅ ¡Se importaron e insertaron {registros_guardados} habitantes correctamente!")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ El archivo no contiene las columnas necesarias. Faltan: {columnas_faltantes}")
+                            st.info(f"Las columnas requeridas son: {COLUMNAS_ORDENADAS}")
+                    except Exception as e:
+                        st.error(f"Error al procesar e importar el archivo: {e}")
+
+            st.markdown("---")
+            st.markdown("#### Restaurar Base de Datos (.db)")
             uploaded_db = st.file_uploader("Subir archivo .db", type=["db"])
             if uploaded_db is not None:
                 if st.button("⚠️ Confirmar Reemplazo de BD"):
@@ -561,26 +688,3 @@ if ES_MASTER and "💾 Respaldos e Importación" in pestañas:
                         f.write(uploaded_db.getbuffer())
                     st.success("✅ Base de datos restaurada con éxito.")
                     st.rerun()
-                    
-            st.markdown("---")
-            st.markdown("#### 2. Cargar Habitantes desde CSV")
-            uploaded_csv = st.file_uploader("Subir CSV de habitantes", type=["csv"])
-            if uploaded_csv is not None:
-                if st.button("📥 Importar Habitantes desde CSV"):
-                    try:
-                        df_imp = pd.read_csv(uploaded_csv)
-                        required_cols = ["cedula", "nombres", "apellidos", "sexo", "fecha_nac", "fecha_llegada", "direccion", "manzana", "telefono"]
-                        
-                        if all(col in df_imp.columns for col in required_cols):
-                            for _, row in df_imp.iterrows():
-                                guardar_habitante((
-                                    str(row["cedula"]), str(row["nombres"]), str(row["apellidos"]),
-                                    str(row["sexo"]), str(row["fecha_nac"]), str(row["fecha_llegada"]),
-                                    str(row["direccion"]), str(row["manzana"]), str(row["telefono"])
-                                ))
-                            st.success("✅ Datos importados correctamente.")
-                            st.rerun()
-                        else:
-                            st.error(f"El CSV debe contener las columnas: {required_cols}")
-                    except Exception as e:
-                        st.error(f"Error al leer el archivo: {e}")
