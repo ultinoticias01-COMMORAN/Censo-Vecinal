@@ -228,10 +228,8 @@ def agregar_campo_personalizado(nombre, tipo):
 def modificar_campo_personalizado(nombre_actual, nuevo_nombre, nuevo_tipo):
     conn = get_connection()
     cursor = conn.cursor()
-    # 1. Actualizar configuración
     cursor.execute("UPDATE configuracion_campos SET nombre_campo = ?, tipo_campo = ? WHERE nombre_campo = ?", (nuevo_nombre, nuevo_tipo, nombre_actual))
     
-    # 2. Renombrar la llave en los objetos JSON almacenados en la BD
     cursor.execute("SELECT cedula, campos_adicionales FROM habitantes")
     habitantes = cursor.fetchall()
     for ced, json_str in habitantes:
@@ -250,10 +248,8 @@ def modificar_campo_personalizado(nombre_actual, nuevo_nombre, nuevo_tipo):
 def eliminar_campo_personalizado(nombre):
     conn = get_connection()
     cursor = conn.cursor()
-    # 1. Eliminar de la tabla de configuración
     cursor.execute("DELETE FROM configuracion_campos WHERE nombre_campo = ?", (nombre,))
     
-    # 2. Remover la propiedad de los JSON de habitante existentes
     cursor.execute("SELECT cedula, campos_adicionales FROM habitantes")
     habitantes = cursor.fetchall()
     for ced, json_str in habitantes:
@@ -409,7 +405,7 @@ with st.sidebar:
                 st.success("Variable creada con éxito.")
                 st.rerun()
 
-    st.caption("Sistema de Censo Comunitario v3.5")
+    st.caption("Sistema de Censo Comunitario v3.6")
 
 ROL = st.session_state.rol_actual
 ES_MASTER = ROL == "Master"
@@ -434,56 +430,61 @@ if ES_MASTER:
 tabs = st.tabs(pestañas)
 
 # -----------------------------------------------------------------------------
-# TAB: REGISTRAR HABITANTE
+# TAB: REGISTRAR HABITANTE (EN UNA SOLA PÁGINA CONTINUA)
 # -----------------------------------------------------------------------------
 if ES_ADMIN_OR_MASTER and "📝 Registrar Habitante" in pestañas:
     with tabs[pestañas.index("📝 Registrar Habitante")]:
-        st.subheader("Formulario de Registro de Habitante")
-        
-        tab_p1, tab_p2, tab_p3, tab_p4 = st.tabs([
-            "👤 Datos Personales", 
-            "🏠 Ubicación y Vivienda", 
-            "⚕️ Salud y Vulnerabilidad", 
-            "➕ Campos Adicionales"
-        ])
+        st.subheader("📝 Formulario Unificado de Registro de Habitante")
         
         datos_extra = {}
         
-        with st.form("form_censo_pestañas", clear_on_submit=True):
-            with tab_p1:
-                st.markdown("##### Información Personal e Identificación")
-                col1, col2 = st.columns(2)
-                with col1:
-                    cedula = st.text_input("Cédula de Identidad*")
-                    nombres = st.text_input("Nombres*")
-                    apellidos = st.text_input("Apellidos*")
-                with col2:
-                    sexo = st.selectbox("Sexo / Género*", ["Femenino", "Masculino", "Otro"])
-                    fecha_nac = st.date_input("Fecha de Nacimiento (DD/MM/YYYY)", min_value=datetime(1920, 1, 1), max_value=datetime.now(), format="DD/MM/YYYY")
-                    telefono = st.text_input("Teléfono de Contacto")
+        with st.form("form_censo_unificado", clear_on_submit=True):
+            # 1. DATOS PERSONALES
+            st.markdown("### 👤 Datos Personales e Identificación")
+            col1, col2 = st.columns(2)
+            with col1:
+                cedula = st.text_input("Cédula de Identidad*")
+                nombres = st.text_input("Nombres*")
+                apellidos = st.text_input("Apellidos*")
+            with col2:
+                sexo = st.selectbox("Sexo / Género*", ["Femenino", "Masculino", "Otro"])
+                fecha_nac = st.date_input("Fecha de Nacimiento (DD/MM/YYYY)", min_value=datetime(1920, 1, 1), max_value=datetime.now(), format="DD/MM/YYYY")
+                telefono = st.text_input("Teléfono de Contacto")
 
-            with tab_p2:
-                st.markdown("##### Ubicación dentro de la Comunidad")
-                col3, col4 = st.columns(2)
-                with col3:
-                    manzana = st.text_input("Manzana / Sector")
-                    fecha_llegada = st.date_input("Fecha de Llegada a la Comunidad (DD/MM/YYYY)", min_value=datetime(1950, 1, 1), max_value=datetime.now(), format="DD/MM/YYYY")
-                with col4:
-                    direccion = st.text_area("Dirección Detallada de Habitación")
+            st.markdown("---")
 
-            with tab_p3:
-                st.markdown("##### Condición de Salud y Bienestar")
+            # 2. UBICACIÓN Y VIVIENDA
+            st.markdown("### 🏠 Ubicación y Vivienda")
+            col3, col4 = st.columns(2)
+            with col3:
+                manzana = st.text_input("Manzana / Sector")
+                fecha_llegada = st.date_input("Fecha de Llegada a la Comunidad (DD/MM/YYYY)", min_value=datetime(1950, 1, 1), max_value=datetime.now(), format="DD/MM/YYYY")
+            with col4:
+                direccion = st.text_area("Dirección Detallada de Habitación")
+
+            st.markdown("---")
+
+            # 3. SALUD Y VULNERABILIDAD
+            st.markdown("### ⚕️ Salud y Vulnerabilidad")
+            col5, col6 = st.columns(2)
+            with col5:
                 condicion_salud = st.selectbox(
                     "Condición / Afectación de Salud",
                     ["Ninguna", "Enfermedad Crónica", "Discapacidad", "Adulto Mayor Encamado", "Embarazada", "Población de Riesgo", "Otra"]
                 )
+            with col6:
                 detalle_salud = st.text_input("Detalles adicionales o especificación de salud:")
 
-            with tab_p4:
-                st.markdown("##### Variables y Pestañas Personalizadas")
-                campos_config = cargar_campos_personalizados()
-                if campos_config:
-                    for nom_c, tipo_c in campos_config:
+            st.markdown("---")
+
+            # 4. CAMPOS ADICIONALES / VARIABLES PERSONALIZADAS
+            st.markdown("### ➕ Campos Adicionales Personalizados")
+            campos_config = cargar_campos_personalizados()
+            if campos_config:
+                col_c1, col_c2 = st.columns(2)
+                for idx, (nom_c, tipo_c) in enumerate(campos_config):
+                    target_col = col_c1 if idx % 2 == 0 else col_c2
+                    with target_col:
                         if tipo_c == "Texto":
                             datos_extra[nom_c] = st.text_input(f"{nom_c}:")
                         elif tipo_c == "Número":
@@ -491,8 +492,8 @@ if ES_ADMIN_OR_MASTER and "📝 Registrar Habitante" in pestañas:
                         elif tipo_c == "Fecha":
                             d_extra = st.date_input(f"{nom_c} (DD/MM/YYYY):", format="DD/MM/YYYY")
                             datos_extra[nom_c] = d_extra.strftime("%d/%m/%Y")
-                else:
-                    st.info("No hay variables personalizadas configuradas.")
+            else:
+                st.info("No hay variables personalizadas creadas aún.")
 
             st.markdown("---")
             guardar = st.form_submit_button("💾 Guardar Registro de Habitante", type="primary", use_container_width=True)
@@ -660,11 +661,11 @@ if ES_ADMIN_OR_MASTER and "📄 Bitácora de Documentos" in pestañas:
 # -----------------------------------------------------------------------------
 if ES_ADMIN_OR_MASTER and "⚙️ Editar / Eliminar" in pestañas:
     with tabs[pestañas.index("⚙️ Editar / Eliminar")]:
-        st.subheader("⚙️ Modificación de Datos y Gestor Global de Variables")
+        st.subheader("⚙️ Modificación Total de Datos y Gestor Global de Variables")
         
         sub_tab1, sub_tab2 = st.tabs(["👥 Editar / Eliminar Habitante", "🛠️ Gestor de Variables Personalizadas"])
         
-        # --- SUBTAB 1: EDITAR / ELIMINAR HABITANTE ---
+        # --- SUBTAB 1: EDITAR / ELIMINAR HABITANTE (TODO EN UNA PÁGINA) ---
         with sub_tab1:
             df_edit = cargar_habitantes()
             if not df_edit.empty:
@@ -676,49 +677,72 @@ if ES_ADMIN_OR_MASTER and "⚙️ Editar / Eliminar" in pestañas:
                 except:
                     dict_dyn = {}
 
-                st.warning(f"Está modificando a: **{hab['nombres']} {hab['apellidos']}** (Cédula actual: `{hab['cedula']}`)")
+                st.warning(f"Modificando a: **{hab['nombres']} {hab['apellidos']}** (Cédula: `{hab['cedula']}`)")
 
-                tab_e1, tab_e2, tab_e3, tab_e4 = st.tabs(["👤 Datos Personales & Cédula", "🏠 Ubicación", "⚕️ Salud", "➕ Personalizados"])
-
-                with st.form("form_edit_tabs"):
-                    with tab_e1:
-                        st.markdown("##### Modificar Identificación y Datos Personales")
+                with st.form("form_edit_unificado"):
+                    # 1. DATOS PERSONALES & CÉDULA
+                    st.markdown("### 👤 Datos Personales e Identificación")
+                    col_e1, col_e2 = st.columns(2)
+                    with col_e1:
                         e_cedula = st.text_input("Cédula de Identidad:", value=hab['cedula'])
                         e_nombres = st.text_input("Nombres:", value=hab['nombres'])
                         e_apellidos = st.text_input("Apellidos:", value=hab['apellidos'])
-                        
+                    with col_e2:
                         opciones_sexo = ["Femenino", "Masculino", "Otro"]
                         val_sexo = hab['sexo'] if hab['sexo'] in opciones_sexo else "Femenino"
-                        e_sexo = st.selectbox("Sexo:", opciones_sexo, index=opciones_sexo.index(val_sexo))
+                        e_sexo = st.selectbox("Sexo / Género:", opciones_sexo, index=opciones_sexo.index(val_sexo))
+                        
+                        fn_dt = parsear_fecha_bd(hab['fecha_nac'])
+                        e_fn = st.date_input("Fecha Nacimiento (DD/MM/YYYY):", value=fn_dt, format="DD/MM/YYYY")
                         e_telefono = st.text_input("Teléfono:", value=hab['telefono'])
 
-                    with tab_e2:
-                        fn_dt = parsear_fecha_bd(hab['fecha_nac'])
-                        fl_dt = parsear_fecha_bd(hab['fecha_llegada'])
-                        
-                        e_fn = st.date_input("Fecha Nacimiento (DD/MM/YYYY):", value=fn_dt, format="DD/MM/YYYY")
-                        e_fl = st.date_input("Fecha Llegada (DD/MM/YYYY):", value=fl_dt, format="DD/MM/YYYY")
-                        e_manzana = st.text_input("Manzana / Sector:", value=hab['manzana'])
-                        e_direccion = st.text_area("Dirección:", value=hab['direccion'])
+                    st.markdown("---")
 
-                    with tab_e3:
+                    # 2. UBICACIÓN Y VIVIENDA
+                    st.markdown("### 🏠 Ubicación y Vivienda")
+                    col_e3, col_e4 = st.columns(2)
+                    with col_e3:
+                        e_manzana = st.text_input("Manzana / Sector:", value=hab['manzana'])
+                        fl_dt = parsear_fecha_bd(hab['fecha_llegada'])
+                        e_fl = st.date_input("Fecha Llegada a la Comunidad (DD/MM/YYYY):", value=fl_dt, format="DD/MM/YYYY")
+                    with col_e4:
+                        e_direccion = st.text_area("Dirección Detallada:", value=hab['direccion'])
+
+                    st.markdown("---")
+
+                    # 3. SALUD Y VULNERABILIDAD
+                    st.markdown("### ⚕️ Salud y Vulnerabilidad")
+                    col_e5, col_e6 = st.columns(2)
+                    with col_e5:
                         opciones_salud = ["Ninguna", "Enfermedad Crónica", "Discapacidad", "Adulto Mayor Encamado", "Embarazada", "Población de Riesgo", "Otra"]
                         val_salud = hab['condicion_salud'] if hab['condicion_salud'] in opciones_salud else "Ninguna"
                         e_condicion_salud = st.selectbox("Condición de Salud:", opciones_salud, index=opciones_salud.index(val_salud))
-                        e_detalle_salud = st.text_input("Detalle Médicos:", value=hab['detalle_salud'])
+                    with col_e6:
+                        e_detalle_salud = st.text_input("Detalles Médicos:", value=hab['detalle_salud'])
 
-                    with tab_e4:
-                        e_dict_extra = {}
-                        campos_cfg = cargar_campos_personalizados()
-                        for nom_c, tipo_c in campos_cfg:
+                    st.markdown("---")
+
+                    # 4. CAMPOS ADICIONALES
+                    st.markdown("### ➕ Campos Adicionales Personalizados")
+                    e_dict_extra = {}
+                    campos_cfg = cargar_campos_personalizados()
+                    
+                    if campos_cfg:
+                        col_ec1, col_ec2 = st.columns(2)
+                        for idx, (nom_c, tipo_c) in enumerate(campos_cfg):
+                            target_col = col_ec1 if idx % 2 == 0 else col_ec2
                             val_prev = dict_dyn.get(nom_c, "")
-                            if tipo_c == "Texto":
-                                e_dict_extra[nom_c] = st.text_input(nom_c, value=str(val_prev))
-                            elif tipo_c == "Número":
-                                e_dict_extra[nom_c] = st.number_input(nom_c, value=int(val_prev) if str(val_prev).isdigit() else 0)
-                            elif tipo_c == "Fecha":
-                                e_dict_extra[nom_c] = st.text_input(f"{nom_c} (DD/MM/YYYY):", value=str(val_prev))
+                            with target_col:
+                                if tipo_c == "Texto":
+                                    e_dict_extra[nom_c] = st.text_input(f"{nom_c}:", value=str(val_prev))
+                                elif tipo_c == "Número":
+                                    e_dict_extra[nom_c] = st.number_input(f"{nom_c}:", value=int(val_prev) if str(val_prev).isdigit() else 0)
+                                elif tipo_c == "Fecha":
+                                    e_dict_extra[nom_c] = st.text_input(f"{nom_c} (DD/MM/YYYY):", value=str(val_prev))
+                    else:
+                        st.info("No hay variables personalizadas configuradas.")
 
+                    st.markdown("---")
                     btn_mod = st.form_submit_button("💾 Guardar Cambios del Habitante", type="primary", use_container_width=True)
                     
                     if btn_mod:
@@ -730,7 +754,7 @@ if ES_ADMIN_OR_MASTER and "⚙️ Editar / Eliminar" in pestañas:
                                 e_condicion_salud, e_detalle_salud.strip(), json.dumps(e_dict_extra, ensure_ascii=False)
                             )
                             actualizar_habitante_completo(cedula_buscar, datos_mod)
-                            st.success("✅ Datos del habitante actualizados completamente.")
+                            st.success("✅ ¡Todos los datos del habitante se actualizaron correctamente!")
                             st.rerun()
                         else:
                             st.error("⚠️ La cédula, nombres y apellidos no pueden estar vacíos.")
@@ -757,7 +781,6 @@ if ES_ADMIN_OR_MASTER and "⚙️ Editar / Eliminar" in pestañas:
                 with col_v1:
                     st.markdown("##### ✏️ Editar Variable Existente")
                     var_mod = st.selectbox("Seleccionar Variable a Editar:", [c[0] for c in campos_existentes], key="sel_mod_var")
-                    
                     tipo_actual = [c[1] for c in campos_existentes if c[0] == var_mod][0]
                     
                     with st.form("form_edit_var"):
