@@ -136,7 +136,7 @@ def init_db():
 init_db()
 
 # -----------------------------------------------------------------------------
-# 2. FUNCIONES DE GESTIÓN Y BASE DE DATOS
+# 2. FUNCIONES DE GESTIÓN Y CÁLCULOS
 # -----------------------------------------------------------------------------
 
 def cargar_configuracion_campos():
@@ -178,7 +178,6 @@ def formato_fecha_pantalla(fecha_str):
         return str(fecha_str)
 
 def parsear_fecha_bd(fecha_str):
-    """Parsea una fecha y asegura que esté dentro de un rango seguro (min 1900)"""
     fecha_defecto = datetime(1990, 1, 1).date()
     if not fecha_str or str(fecha_str).strip() in ["None", "nan", ""]:
         return fecha_defecto
@@ -201,6 +200,15 @@ def calcular_edad(fecha_nac_str):
         f_nac = parsear_fecha_bd(fecha_nac_str)
         hoy = datetime.now().date()
         return hoy.year - f_nac.year - ((hoy.month, hoy.day) < (f_nac.month, f_nac.day))
+    except:
+        return 0
+
+def calcular_tiempo_comunidad(fecha_llegada_str):
+    try:
+        f_lleg = parsear_fecha_bd(fecha_llegada_str)
+        hoy = datetime.now().date()
+        anios = hoy.year - f_lleg.year - ((hoy.month, hoy.day) < (f_lleg.month, f_lleg.day))
+        return max(0, anios)
     except:
         return 0
 
@@ -261,6 +269,24 @@ def borrar_todo_el_censo():
     cursor.execute("DELETE FROM bitacora_documentos")
     conn.commit()
     conn.close()
+
+# --- FUNCIONES DE BITÁCORA ---
+def registrar_documento_bitacora(cedula, tipo_doc, descripcion, emitido_por):
+    conn = get_connection()
+    cursor = conn.cursor()
+    fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute("""
+        INSERT INTO bitacora_documentos (cedula, tipo_documento, descripcion, fecha_emision, emitido_por)
+        VALUES (?, ?, ?, ?, ?)
+    """, (cedula, tipo_doc, descripcion, fecha_actual, emitido_por))
+    conn.commit()
+    conn.close()
+
+def obtener_bitacora_habitante(cedula):
+    conn = get_connection()
+    df = pd.read_sql_query("SELECT id, tipo_documento, descripcion, fecha_emision, emitido_por FROM bitacora_documentos WHERE cedula = ? ORDER BY id DESC", conn, params=(cedula,))
+    conn.close()
+    return df
 
 # --- CAMPOS ADICIONALES EXTRA ---
 def cargar_campos_personalizados():
@@ -405,7 +431,7 @@ with st.sidebar:
                 st.success("Variable creada con éxito.")
                 st.rerun()
 
-    st.caption("Sistema de Censo Comunitario v5.1")
+    st.caption("Sistema de Censo Comunitario v5.2")
 
 # -----------------------------------------------------------------------------
 # 6. NAVEGACIÓN Y PESTAÑAS DINÁMICAS
@@ -419,6 +445,8 @@ if tiene_permiso("registrar_habitantes"):
     pestañas.append("📝 Registrar Habitante")
 if tiene_permiso("editar_habitantes") or tiene_permiso("eliminar_habitantes"):
     pestañas.append("⚙️ Editar / Eliminar")
+if tiene_permiso("gestion_bitacora"):
+    pestañas.append("📜 Bitácora de Documentos")
 if tiene_permiso("ver_estadisticas"):
     pestañas.append("📈 Estadísticas")
 if tiene_permiso("personalizar_etiquetas"):
@@ -435,110 +463,91 @@ if not pestañas:
 tabs = st.tabs(pestañas)
 
 # -----------------------------------------------------------------------------
-# TAB: ESTADÍSTICAS (MÓDULO REPARADO Y COMPLETO)
+# TAB: CONSULTAR Y FILTROS (CON EDAD Y TIEMPO EN LA COMUNIDAD)
 # -----------------------------------------------------------------------------
-if "📈 Estadísticas" in pestañas:
-    with tabs[pestañas.index("📈 Estadísticas")]:
-        st.subheader("📈 Resumen Estadístico e Indicadores de la Comunidad")
-        df_stat = cargar_habitantes()
+if "📊 Consultar y Filtros" in pestañas:
+    with tabs[pestañas.index("📊 Consultar y Filtros")]:
+        st.subheader("📊 Consulta General y Filtros del Censo")
+        df = cargar_habitantes()
         
-        if not df_stat.empty:
-            # Cálculo de edad
-            df_stat["edad"] = df_stat["fecha_nac"].apply(calcular_edad)
+        if not df.empty:
+            # Cálculo dinámico de EDAD y TIEMPO EN LA COMUNIDAD
+            df["Edad"] = df["fecha_nac"].apply(calcular_edad)
+            df["Años en la Comunidad"] = df["fecha_llegada"].apply(calcular_tiempo_comunidad)
             
-            # Categorización por Rango de Edad
-            def clasificar_edad(edad):
-                if edad < 12: return "Niños (0-11)"
-                elif edad < 18: return "Adolescentes (12-17)"
-                elif edad < 60: return "Adultos (18-59)"
-                else: return "Adultos Mayores (60+)"
+            df_pantalla = df.copy()
+            df_pantalla["fecha_nac"] = df_pantalla["fecha_nac"].apply(formato_fecha_pantalla)
+            df_pantalla["fecha_llegada"] = df_pantalla["fecha_llegada"].apply(formato_fecha_pantalla)
             
-            df_stat["grupo_edad"] = df_stat["edad"].apply(clasificar_edad)
+            # Reorganizar columnas principales
+            columnas_ordenadas = [
+                "cedula", "nombres", "apellidos", "sexo", "Edad", "fecha_nac",
+                "Años en la Comunidad", "fecha_llegada", "manzana", "direccion",
+                "telefono", "condicion_salud", "detalle_salud"
+            ]
             
-            # Métricas Top
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Total Habitantes", len(df_stat))
-            m2.metric("Adultos Mayores (60+)", len(df_stat[df_stat["edad"] >= 60]))
-            m3.metric("Menores de Edad (<18)", len(df_stat[df_stat["edad"] < 18]))
-            m4.metric("Con Afectación de Salud", len(df_stat[df_stat["condicion_salud"] != "Ninguna"]))
-            
-            st.markdown("---")
-            
-            # Gráficas
-            col_g1, col_g2 = st.columns(2)
-            
-            with col_g1:
-                st.markdown("##### 👥 Distribución por Sexo / Género")
-                fig_sexo = px.pie(df_stat, names="sexo", hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
-                st.plotly_chart(fig_sexo, use_container_width=True)
-                
-                st.markdown("##### 🏘️ Habitantes por Manzana / Sector")
-                df_manzana = df_stat["manzana"].value_counts().reset_index()
-                df_manzana.columns = ["Manzana", "Cantidad"]
-                fig_manz = px.bar(df_manzana, x="Manzana", y="Cantidad", color="Cantidad", color_continuous_scale="Blues")
-                st.plotly_chart(fig_manz, use_container_width=True)
+            renombrar_dic = {clave: cfg_campos.get(clave, {}).get("etiqueta", clave) for clave in CAMPOS_BASE_DEFAULT.keys()}
+            df_pantalla = df_pantalla[columnas_ordenadas].rename(columns=renombrar_dic)
 
-            with col_g2:
-                st.markdown("##### 🎂 Grupos Etarios")
-                df_grupo = df_stat["grupo_edad"].value_counts().reset_index()
-                df_grupo.columns = ["Grupo Etario", "Habitantes"]
-                fig_edad = px.bar(df_grupo, x="Grupo Etario", y="Habitantes", color="Grupo Etario", color_discrete_sequence=px.colors.qualitative.Set2)
-                st.plotly_chart(fig_edad, use_container_width=True)
-                
-                st.markdown("##### ⚕️ Condición de Salud / Vulnerabilidad")
-                df_salud = df_stat["condicion_salud"].value_counts().reset_index()
-                df_salud.columns = ["Condición", "Casos"]
-                fig_salud = px.pie(df_salud, values="Casos", names="Condición", color_discrete_sequence=px.colors.qualitative.Safe)
-                st.plotly_chart(fig_salud, use_container_width=True)
+            busqueda = st.text_input("🔍 Buscar por cédula, nombre, manzana...")
+            if busqueda:
+                df_pantalla = df_pantalla[df_pantalla.astype(str).apply(lambda x: x.str.contains(busqueda, case=False)).any(axis=1)]
+
+            st.dataframe(df_pantalla, use_container_width=True, hide_index=True)
         else:
-            st.info("📊 No hay datos suficientes para generar estadísticas. Registre habitantes primero.")
+            st.info("No hay registros cargados.")
 
 # -----------------------------------------------------------------------------
-# TAB: PERSONALIZAR FORMULARIO
+# TAB: BITÁCORA DE DOCUMENTOS (CONSTANCIAS / CARTAS)
 # -----------------------------------------------------------------------------
-if "✏️ Personalizar Formulario" in pestañas:
-    with tabs[pestañas.index("✏️ Personalizar Formulario")]:
-        st.subheader("✏️ Configurar Campos y Listas Desplegables del Formulario")
-        st.info("Cambia el nombre de cada campo, elige entre Texto Libre o Lista Desplegable y añade opciones separadas por comas.")
+if "📜 Bitácora de Documentos" in pestañas:
+    with tabs[pestañas.index("📜 Bitácora de Documentos")]:
+        st.subheader("📜 Registro y Bitácora de Emitidos (Cartas y Constancias)")
+        df_bit = cargar_habitantes()
         
-        with st.form("form_config_campos_avanzado"):
-            for clave, (etiqueta_def, tipo_def, opciones_def) in CAMPOS_BASE_DEFAULT.items():
-                st.markdown(f"#### ⚙️ Campo: `{clave}`")
-                c_data = cfg_campos.get(clave, {"etiqueta": etiqueta_def, "tipo_control": tipo_def, "opciones": json.loads(opciones_def)})
+        if not df_bit.empty:
+            col_b1, col_b2 = st.columns([1, 2])
+            
+            with col_b1:
+                st.markdown("### ✍️ Emitir / Registrar Documento")
+                habitante_sel = st.selectbox(
+                    "Seleccione Habitante:", 
+                    options=df_bit["cedula"].tolist(),
+                    format_func=lambda c: f"{c} - {df_bit[df_bit['cedula']==c]['nombres'].values[0]} {df_bit[df_bit['cedula']==c]['apellidos'].values[0]}"
+                )
                 
-                col_c1, col_c2, col_c3 = st.columns([2, 1.5, 3])
-                with col_c1:
-                    st.text_input(f"Nombre del campo ({clave}):", value=c_data["etiqueta"], key=f"cfg_lbl_{clave}")
-                with col_c2:
-                    st.selectbox(
-                        "Tipo de control:",
-                        ["texto", "desplegable"],
-                        index=0 if c_data["tipo_control"] == "texto" else 1,
-                        key=f"cfg_tipo_{clave}"
-                    )
-                with col_c3:
-                    str_opciones_actuales = ", ".join(c_data["opciones"])
-                    st.text_input(
-                        "Opciones (separadas por comas):",
-                        value=str_opciones_actuales,
-                        key=f"cfg_ops_{clave}"
-                    )
-                st.markdown("---")
-
-            if st.form_submit_button("💾 Guardar Toda la Configuración del Formulario", type="primary", use_container_width=True):
-                for clave in CAMPOS_BASE_DEFAULT.keys():
-                    etiq_val = st.session_state[f"cfg_lbl_{clave}"].strip()
-                    tipo_ctrl_val = st.session_state[f"cfg_tipo_{clave}"]
-                    ops_raw = st.session_state[f"cfg_ops_{clave}"]
+                with st.form("form_registro_bitacora", clear_on_submit=True):
+                    tipo_doc = st.selectbox("Tipo de Documento:", [
+                        "Constancia de Residencia",
+                        "Carta de Buena Conducta",
+                        "Constancia de Soltería",
+                        "Permiso de Mudanza",
+                        "Aval Comunitario",
+                        "Otro Documento"
+                    ])
+                    desc_doc = st.text_area("Observaciones / Detalles del Trámite:")
+                    btn_bit = st.form_submit_button("📜 Registrar en Bitácora", type="primary", use_container_width=True)
                     
-                    lista_ops = [x.strip() for x in ops_raw.split(",") if x.strip()]
-                    guardar_configuracion_campo(clave, etiq_val, tipo_ctrl_val, lista_ops)
+                    if btn_bit:
+                        registrar_documento_bitacora(habitante_sel, tipo_doc, desc_doc.strip(), st.session_state.usuario_actual)
+                        st.success("✅ Trámite registrado en la bitácora del habitante.")
+                        st.rerun()
+
+            with col_b2:
+                st.markdown(f"### 📑 Historial de Trámites del Habitante (`Cédula: {habitante_sel}`)")
+                df_historial = obtener_bitacora_habitante(habitante_sel)
                 
-                st.success("✅ Configuración guardada correctamente.")
-                st.rerun()
+                if not df_historial.empty:
+                    df_historial["fecha_emision"] = df_historial["fecha_emision"].apply(formato_fecha_pantalla)
+                    df_historial.columns = ["ID", "Documento", "Detalles", "Fecha Emisión", "Emitido Por"]
+                    st.dataframe(df_historial, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No se han emitido constancias ni documentos previos para este habitante.")
+        else:
+            st.info("Registre habitantes para utilizar el módulo de bitácora.")
 
 # -----------------------------------------------------------------------------
-# TAB: REGISTRAR HABITANTE (MIN_VALUE 1900 EN FECHAS)
+# TAB: REGISTRAR HABITANTE
 # -----------------------------------------------------------------------------
 if "📝 Registrar Habitante" in pestañas:
     with tabs[pestañas.index("📝 Registrar Habitante")]:
@@ -616,31 +625,7 @@ if "📝 Registrar Habitante" in pestañas:
                 st.error("⚠️ Ingrese los campos obligatorios.")
 
 # -----------------------------------------------------------------------------
-# TAB: CONSULTAR Y FILTROS
-# -----------------------------------------------------------------------------
-if "📊 Consultar y Filtros" in pestañas:
-    with tabs[pestañas.index("📊 Consultar y Filtros")]:
-        st.subheader("Consulta General de Habitantes")
-        df = cargar_habitantes()
-        
-        if not df.empty:
-            df_pantalla = df.copy()
-            df_pantalla["fecha_nac"] = df_pantalla["fecha_nac"].apply(formato_fecha_pantalla)
-            df_pantalla["fecha_llegada"] = df_pantalla["fecha_llegada"].apply(formato_fecha_pantalla)
-            
-            renombrar_dic = {clave: cfg_campos.get(clave, {}).get("etiqueta", clave) for clave in CAMPOS_BASE_DEFAULT.keys()}
-            df_pantalla = df_pantalla.rename(columns=renombrar_dic)
-
-            busqueda = st.text_input("🔍 Buscar en el censo...")
-            if busqueda:
-                df_pantalla = df_pantalla[df_pantalla.astype(str).apply(lambda x: x.str.contains(busqueda, case=False)).any(axis=1)]
-
-            st.dataframe(df_pantalla, use_container_width=True, hide_index=True)
-        else:
-            st.info("No hay registros cargados.")
-
-# -----------------------------------------------------------------------------
-# TAB: EDITAR / ELIMINAR HABITANTE (CORREGIDO ERROR FECHA 1938)
+# TAB: EDITAR / ELIMINAR HABITANTE
 # -----------------------------------------------------------------------------
 if "⚙️ Editar / Eliminar" in pestañas:
     with tabs[pestañas.index("⚙️ Editar / Eliminar")]:
@@ -666,7 +651,6 @@ if "⚙️ Editar / Eliminar" in pestañas:
                 with col_e2:
                     e_sexo = renderizar_campo_dinamico("sexo", cfg_campos, hab['sexo'], key_suffix="edit")
                     
-                    # AQUÍ ESTABA EL ERROR: Se agregó min_value=datetime(1900, 1, 1)
                     fn_dt = parsear_fecha_bd(hab['fecha_nac'])
                     lbl_fn = cfg_campos.get("fecha_nac", {}).get("etiqueta", "Fecha Nacimiento")
                     e_fn = st.date_input(
@@ -748,11 +732,108 @@ if "⚙️ Editar / Eliminar" in pestañas:
                     st.rerun()
 
 # -----------------------------------------------------------------------------
+# TAB: ESTADÍSTICAS
+# -----------------------------------------------------------------------------
+if "📈 Estadísticas" in pestañas:
+    with tabs[pestañas.index("📈 Estadísticas")]:
+        st.subheader("📈 Resumen Estadístico e Indicadores de la Comunidad")
+        df_stat = cargar_habitantes()
+        
+        if not df_stat.empty:
+            df_stat["edad"] = df_stat["fecha_nac"].apply(calcular_edad)
+            
+            def clasificar_edad(edad):
+                if edad < 12: return "Niños (0-11)"
+                elif edad < 18: return "Adolescentes (12-17)"
+                elif edad < 60: return "Adultos (18-59)"
+                else: return "Adultos Mayores (60+)"
+            
+            df_stat["grupo_edad"] = df_stat["edad"].apply(clasificar_edad)
+            
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Total Habitantes", len(df_stat))
+            m2.metric("Adultos Mayores (60+)", len(df_stat[df_stat["edad"] >= 60]))
+            m3.metric("Menores de Edad (<18)", len(df_stat[df_stat["edad"] < 18]))
+            m4.metric("Con Afectación de Salud", len(df_stat[df_stat["condicion_salud"] != "Ninguna"]))
+            
+            st.markdown("---")
+            col_g1, col_g2 = st.columns(2)
+            
+            with col_g1:
+                st.markdown("##### 👥 Distribución por Sexo / Género")
+                fig_sexo = px.pie(df_stat, names="sexo", hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
+                st.plotly_chart(fig_sexo, use_container_width=True)
+                
+                st.markdown("##### 🏘️ Habitantes por Manzana / Sector")
+                df_manzana = df_stat["manzana"].value_counts().reset_index()
+                df_manzana.columns = ["Manzana", "Cantidad"]
+                fig_manz = px.bar(df_manzana, x="Manzana", y="Cantidad", color="Cantidad", color_continuous_scale="Blues")
+                st.plotly_chart(fig_manz, use_container_width=True)
+
+            with col_g2:
+                st.markdown("##### 🎂 Grupos Etarios")
+                df_grupo = df_stat["grupo_edad"].value_counts().reset_index()
+                df_grupo.columns = ["Grupo Etario", "Habitantes"]
+                fig_edad = px.bar(df_grupo, x="Grupo Etario", y="Habitantes", color="Grupo Etario", color_discrete_sequence=px.colors.qualitative.Set2)
+                st.plotly_chart(fig_edad, use_container_width=True)
+                
+                st.markdown("##### ⚕️ Condición de Salud / Vulnerabilidad")
+                df_salud = df_stat["condicion_salud"].value_counts().reset_index()
+                df_salud.columns = ["Condición", "Casos"]
+                fig_salud = px.pie(df_salud, values="Casos", names="Condición", color_discrete_sequence=px.colors.qualitative.Safe)
+                st.plotly_chart(fig_salud, use_container_width=True)
+        else:
+            st.info("📊 No hay datos suficientes para generar estadísticas.")
+
+# -----------------------------------------------------------------------------
+# TAB: PERSONALIZAR FORMULARIO
+# -----------------------------------------------------------------------------
+if "✏️ Personalizar Formulario" in pestañas:
+    with tabs[pestañas.index("✏️ Personalizar Formulario")]:
+        st.subheader("✏️ Configurar Campos y Listas Desplegables del Formulario")
+        
+        with st.form("form_config_campos_avanzado"):
+            for clave, (etiqueta_def, tipo_def, opciones_def) in CAMPOS_BASE_DEFAULT.items():
+                st.markdown(f"#### ⚙️ Campo: `{clave}`")
+                c_data = cfg_campos.get(clave, {"etiqueta": etiqueta_def, "tipo_control": tipo_def, "opciones": json.loads(opciones_def)})
+                
+                col_c1, col_c2, col_c3 = st.columns([2, 1.5, 3])
+                with col_c1:
+                    st.text_input(f"Nombre del campo ({clave}):", value=c_data["etiqueta"], key=f"cfg_lbl_{clave}")
+                with col_c2:
+                    st.selectbox(
+                        "Tipo de control:",
+                        ["texto", "desplegable"],
+                        index=0 if c_data["tipo_control"] == "texto" else 1,
+                        key=f"cfg_tipo_{clave}"
+                    )
+                with col_c3:
+                    str_opciones_actuales = ", ".join(c_data["opciones"])
+                    st.text_input(
+                        "Opciones (separadas por comas):",
+                        value=str_opciones_actuales,
+                        key=f"cfg_ops_{clave}"
+                    )
+                st.markdown("---")
+
+            if st.form_submit_button("💾 Guardar Toda la Configuración del Formulario", type="primary", use_container_width=True):
+                for clave in CAMPOS_BASE_DEFAULT.keys():
+                    etiq_val = st.session_state[f"cfg_lbl_{clave}"].strip()
+                    tipo_ctrl_val = st.session_state[f"cfg_tipo_{clave}"]
+                    ops_raw = st.session_state[f"cfg_ops_{clave}"]
+                    
+                    lista_ops = [x.strip() for x in ops_raw.split(",") if x.strip()]
+                    guardar_configuracion_campo(clave, etiq_val, tipo_ctrl_val, lista_ops)
+                
+                st.success("✅ Configuración guardada correctamente.")
+                st.rerun()
+
+# -----------------------------------------------------------------------------
 # TAB: GESTIÓN DE USUARIOS
 # -----------------------------------------------------------------------------
 if st.session_state.rol_actual == "Master" and "👥 Usuarios y Permisos" in pestañas:
     with tabs[pestañas.index("👥 Usuarios y Permisos")]:
-        st.subheader("👥 Control de Usuarios y Matriz de Permisos (Dominio Máster)")
+        st.subheader("👥 Control de Usuarios y Matriz de Permisos")
         
         df_users = cargar_usuarios()
         col_u1, col_u2 = st.columns([1, 1])
