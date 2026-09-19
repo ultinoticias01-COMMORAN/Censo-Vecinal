@@ -13,7 +13,6 @@ st.set_page_config(page_title="Censo Comunitario Avanzado", page_icon="🏡", la
 
 DB_FILE = "censo.db"
 
-# Campos del formulario por defecto (etiqueta, tipo_control, opciones_json)
 CAMPOS_BASE_DEFAULT = {
     "cedula": ("Cédula de Identidad", "texto", "[]"),
     "nombres": ("Nombres", "texto", "[]"),
@@ -46,7 +45,6 @@ def init_db():
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Tabla de Habitantes
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS habitantes (
             cedula TEXT PRIMARY KEY,
@@ -64,7 +62,6 @@ def init_db():
         )
     """)
     
-    # Tabla de Usuarios
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             username TEXT PRIMARY KEY,
@@ -75,7 +72,6 @@ def init_db():
         )
     """)
     
-    # Migración de permisos de usuarios
     cursor.execute("PRAGMA table_info(usuarios)")
     cols_usuarios = [column[1] for column in cursor.fetchall()]
     if "permisos" not in cols_usuarios:
@@ -87,7 +83,6 @@ def init_db():
         cursor.execute("UPDATE usuarios SET permisos = ? WHERE username = 'admin'", (perm_admin,))
         cursor.execute("UPDATE usuarios SET permisos = ? WHERE username = 'user'", (perm_user,))
 
-    # Tabla de Configuración Avanzada de Campos (Estructura y Listas Desplegables)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS configuracion_estilo_campos (
             clave_campo TEXT PRIMARY KEY,
@@ -97,7 +92,6 @@ def init_db():
         )
     """)
     
-    # Migración de configuración avanzada de campos
     cursor.execute("PRAGMA table_info(configuracion_estilo_campos)")
     if cursor.fetchall():
         for clave, (etiqueta_def, tipo_def, opciones_def) in CAMPOS_BASE_DEFAULT.items():
@@ -106,7 +100,6 @@ def init_db():
                 VALUES (?, ?, ?, ?)
             """, (clave, etiqueta_def, tipo_def, opciones_def))
 
-    # Tabla de Bitácora
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS bitacora_documentos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -119,7 +112,6 @@ def init_db():
         )
     """)
     
-    # Tabla de Campos Adicionales Extra
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS configuracion_campos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -128,7 +120,6 @@ def init_db():
         )
     """)
     
-    # Inicializar Usuarios por Defecto
     cursor.execute("SELECT COUNT(*) FROM usuarios")
     if cursor.fetchone()[0] == 0:
         permisos_master = json.dumps({p: True for p in LISTA_PERMISOS})
@@ -187,13 +178,31 @@ def formato_fecha_pantalla(fecha_str):
         return str(fecha_str)
 
 def parsear_fecha_bd(fecha_str):
+    """Parsea una fecha y asegura que esté dentro de un rango seguro (min 1900)"""
+    fecha_defecto = datetime(1990, 1, 1).date()
+    if not fecha_str or str(fecha_str).strip() in ["None", "nan", ""]:
+        return fecha_defecto
+    
     try:
         s = str(fecha_str).split()[0]
         if "/" in s:
-            return datetime.strptime(s, "%d/%m/%Y").date()
-        return datetime.strptime(s, "%Y-%m-%d").date()
+            f = datetime.strptime(s, "%d/%m/%Y").date()
+        else:
+            f = datetime.strptime(s, "%Y-%m-%d").date()
+            
+        if f.year < 1900:
+            return datetime(1900, 1, 1).date()
+        return f
     except:
-        return datetime.now().date()
+        return fecha_defecto
+
+def calcular_edad(fecha_nac_str):
+    try:
+        f_nac = parsear_fecha_bd(fecha_nac_str)
+        hoy = datetime.now().date()
+        return hoy.year - f_nac.year - ((hoy.month, hoy.day) < (f_nac.month, f_nac.day))
+    except:
+        return 0
 
 def cargar_habitantes():
     conn = get_connection()
@@ -313,7 +322,6 @@ def tiene_permiso(clave_permiso):
     permisos = st.session_state.get("permisos_usuario", {})
     return permisos.get(clave_permiso, False)
 
-# Función para renderizar dinámicamente un campo (Texto o Lista Desplegable)
 def renderizar_campo_dinamico(key_campo, cfg_dict, valor_previo="", key_suffix=""):
     cfg = cfg_dict.get(key_campo, {"etiqueta": key_campo, "tipo_control": "texto", "opciones": []})
     etiqueta = cfg["etiqueta"]
@@ -322,8 +330,8 @@ def renderizar_campo_dinamico(key_campo, cfg_dict, valor_previo="", key_suffix="
     
     if tipo == "desplegable" and opciones:
         index_sel = 0
-        if valor_previo in opciones:
-            index_sel = opciones.index(valor_previo)
+        if str(valor_previo) in opciones:
+            index_sel = opciones.index(str(valor_previo))
         return st.selectbox(f"{etiqueta}:", opciones, index=index_sel, key=f"{key_campo}_{key_suffix}")
     else:
         return st.text_input(f"{etiqueta}:", value=str(valor_previo), key=f"{key_campo}_{key_suffix}")
@@ -397,10 +405,10 @@ with st.sidebar:
                 st.success("Variable creada con éxito.")
                 st.rerun()
 
-    st.caption("Sistema de Censo Comunitario v5.0")
+    st.caption("Sistema de Censo Comunitario v5.1")
 
 # -----------------------------------------------------------------------------
-# 6. NAVEGACIÓN Y PESTAÑAS DINÁMICAS SEGÚN PERMISOS
+# 6. NAVEGACIÓN Y PESTAÑAS DINÁMICAS
 # -----------------------------------------------------------------------------
 st.title("🏡 Censo Digital de la Comunidad")
 
@@ -427,12 +435,71 @@ if not pestañas:
 tabs = st.tabs(pestañas)
 
 # -----------------------------------------------------------------------------
-# TAB: PERSONALIZAR FORMULARIO (NOMBRES, TIPOS Y OPCIONES DESPLEGABLES)
+# TAB: ESTADÍSTICAS (MÓDULO REPARADO Y COMPLETO)
+# -----------------------------------------------------------------------------
+if "📈 Estadísticas" in pestañas:
+    with tabs[pestañas.index("📈 Estadísticas")]:
+        st.subheader("📈 Resumen Estadístico e Indicadores de la Comunidad")
+        df_stat = cargar_habitantes()
+        
+        if not df_stat.empty:
+            # Cálculo de edad
+            df_stat["edad"] = df_stat["fecha_nac"].apply(calcular_edad)
+            
+            # Categorización por Rango de Edad
+            def clasificar_edad(edad):
+                if edad < 12: return "Niños (0-11)"
+                elif edad < 18: return "Adolescentes (12-17)"
+                elif edad < 60: return "Adultos (18-59)"
+                else: return "Adultos Mayores (60+)"
+            
+            df_stat["grupo_edad"] = df_stat["edad"].apply(clasificar_edad)
+            
+            # Métricas Top
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Total Habitantes", len(df_stat))
+            m2.metric("Adultos Mayores (60+)", len(df_stat[df_stat["edad"] >= 60]))
+            m3.metric("Menores de Edad (<18)", len(df_stat[df_stat["edad"] < 18]))
+            m4.metric("Con Afectación de Salud", len(df_stat[df_stat["condicion_salud"] != "Ninguna"]))
+            
+            st.markdown("---")
+            
+            # Gráficas
+            col_g1, col_g2 = st.columns(2)
+            
+            with col_g1:
+                st.markdown("##### 👥 Distribución por Sexo / Género")
+                fig_sexo = px.pie(df_stat, names="sexo", hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
+                st.plotly_chart(fig_sexo, use_container_width=True)
+                
+                st.markdown("##### 🏘️ Habitantes por Manzana / Sector")
+                df_manzana = df_stat["manzana"].value_counts().reset_index()
+                df_manzana.columns = ["Manzana", "Cantidad"]
+                fig_manz = px.bar(df_manzana, x="Manzana", y="Cantidad", color="Cantidad", color_continuous_scale="Blues")
+                st.plotly_chart(fig_manz, use_container_width=True)
+
+            with col_g2:
+                st.markdown("##### 🎂 Grupos Etarios")
+                df_grupo = df_stat["grupo_edad"].value_counts().reset_index()
+                df_grupo.columns = ["Grupo Etario", "Habitantes"]
+                fig_edad = px.bar(df_grupo, x="Grupo Etario", y="Habitantes", color="Grupo Etario", color_discrete_sequence=px.colors.qualitative.Set2)
+                st.plotly_chart(fig_edad, use_container_width=True)
+                
+                st.markdown("##### ⚕️ Condición de Salud / Vulnerabilidad")
+                df_salud = df_stat["condicion_salud"].value_counts().reset_index()
+                df_salud.columns = ["Condición", "Casos"]
+                fig_salud = px.pie(df_salud, values="Casos", names="Condición", color_discrete_sequence=px.colors.qualitative.Safe)
+                st.plotly_chart(fig_salud, use_container_width=True)
+        else:
+            st.info("📊 No hay datos suficientes para generar estadísticas. Registre habitantes primero.")
+
+# -----------------------------------------------------------------------------
+# TAB: PERSONALIZAR FORMULARIO
 # -----------------------------------------------------------------------------
 if "✏️ Personalizar Formulario" in pestañas:
     with tabs[pestañas.index("✏️ Personalizar Formulario")]:
         st.subheader("✏️ Configurar Campos y Listas Desplegables del Formulario")
-        st.info("Aquí puedes cambiar el nombre de cada campo, decidir si será un texto libre o una lista desplegable, y definir sus opciones separadas por comas.")
+        st.info("Cambia el nombre de cada campo, elige entre Texto Libre o Lista Desplegable y añade opciones separadas por comas.")
         
         with st.form("form_config_campos_avanzado"):
             for clave, (etiqueta_def, tipo_def, opciones_def) in CAMPOS_BASE_DEFAULT.items():
@@ -440,11 +507,10 @@ if "✏️ Personalizar Formulario" in pestañas:
                 c_data = cfg_campos.get(clave, {"etiqueta": etiqueta_def, "tipo_control": tipo_def, "opciones": json.loads(opciones_def)})
                 
                 col_c1, col_c2, col_c3 = st.columns([2, 1.5, 3])
-                
                 with col_c1:
-                    nueva_etiq = st.text_input(f"Nombre del campo ({clave}):", value=c_data["etiqueta"], key=f"cfg_lbl_{clave}")
+                    st.text_input(f"Nombre del campo ({clave}):", value=c_data["etiqueta"], key=f"cfg_lbl_{clave}")
                 with col_c2:
-                    nuevo_tipo_ctrl = st.selectbox(
+                    st.selectbox(
                         "Tipo de control:",
                         ["texto", "desplegable"],
                         index=0 if c_data["tipo_control"] == "texto" else 1,
@@ -452,8 +518,8 @@ if "✏️ Personalizar Formulario" in pestañas:
                     )
                 with col_c3:
                     str_opciones_actuales = ", ".join(c_data["opciones"])
-                    nuevas_opciones_str = st.text_input(
-                        "Opciones (separadas por comas si es desplegable):",
+                    st.text_input(
+                        "Opciones (separadas por comas):",
                         value=str_opciones_actuales,
                         key=f"cfg_ops_{clave}"
                     )
@@ -468,11 +534,11 @@ if "✏️ Personalizar Formulario" in pestañas:
                     lista_ops = [x.strip() for x in ops_raw.split(",") if x.strip()]
                     guardar_configuracion_campo(clave, etiq_val, tipo_ctrl_val, lista_ops)
                 
-                st.success("✅ Configuración de campos y listas desplegables actualizada.")
+                st.success("✅ Configuración guardada correctamente.")
                 st.rerun()
 
 # -----------------------------------------------------------------------------
-# TAB: REGISTRAR HABITANTE
+# TAB: REGISTRAR HABITANTE (MIN_VALUE 1900 EN FECHAS)
 # -----------------------------------------------------------------------------
 if "📝 Registrar Habitante" in pestañas:
     with tabs[pestañas.index("📝 Registrar Habitante")]:
@@ -481,7 +547,6 @@ if "📝 Registrar Habitante" in pestañas:
         datos_extra = {}
         
         with st.form("form_censo_unificado", clear_on_submit=True):
-            # 1. DATOS PERSONALES
             st.markdown("### 👤 Datos Personales e Identificación")
             col1, col2 = st.columns(2)
             with col1:
@@ -491,24 +556,22 @@ if "📝 Registrar Habitante" in pestañas:
             with col2:
                 sexo = renderizar_campo_dinamico("sexo", cfg_campos, key_suffix="reg")
                 lbl_fn = cfg_campos.get("fecha_nac", {}).get("etiqueta", "Fecha de Nacimiento")
-                fecha_nac = st.date_input(f"{lbl_fn} (DD/MM/YYYY)", min_value=datetime(1920, 1, 1), max_value=datetime.now(), format="DD/MM/YYYY")
+                fecha_nac = st.date_input(f"{lbl_fn} (DD/MM/YYYY)", min_value=datetime(1900, 1, 1), max_value=datetime.now(), value=datetime(1990, 1, 1), format="DD/MM/YYYY")
                 telefono = renderizar_campo_dinamico("telefono", cfg_campos, key_suffix="reg")
 
             st.markdown("---")
 
-            # 2. UBICACIÓN Y VIVIENDA
             st.markdown("### 🏠 Ubicación y Vivienda")
             col3, col4 = st.columns(2)
             with col3:
                 manzana = renderizar_campo_dinamico("manzana", cfg_campos, key_suffix="reg")
                 lbl_fl = cfg_campos.get("fecha_llegada", {}).get("etiqueta", "Fecha de Llegada")
-                fecha_llegada = st.date_input(f"{lbl_fl} (DD/MM/YYYY)", min_value=datetime(1950, 1, 1), max_value=datetime.now(), format="DD/MM/YYYY")
+                fecha_llegada = st.date_input(f"{lbl_fl} (DD/MM/YYYY)", min_value=datetime(1900, 1, 1), max_value=datetime.now(), value=datetime(2010, 1, 1), format="DD/MM/YYYY")
             with col4:
                 direccion = renderizar_campo_dinamico("direccion", cfg_campos, key_suffix="reg")
 
             st.markdown("---")
 
-            # 3. SALUD Y VULNERABILIDAD
             st.markdown("### ⚕️ Salud y Vulnerabilidad")
             col5, col6 = st.columns(2)
             with col5:
@@ -518,7 +581,6 @@ if "📝 Registrar Habitante" in pestañas:
 
             st.markdown("---")
 
-            # 4. CAMPOS ADICIONALES EXTRA
             st.markdown("### ➕ Campos Adicionales Personalizados")
             campos_config = cargar_campos_personalizados()
             if campos_config:
@@ -531,7 +593,7 @@ if "📝 Registrar Habitante" in pestañas:
                         elif tipo_c == "Número":
                             datos_extra[nom_c] = st.number_input(f"{nom_c}:", value=0)
                         elif tipo_c == "Fecha":
-                            d_extra = st.date_input(f"{nom_c} (DD/MM/YYYY):", format="DD/MM/YYYY")
+                            d_extra = st.date_input(f"{nom_c} (DD/MM/YYYY):", min_value=datetime(1900, 1, 1), format="DD/MM/YYYY")
                             datos_extra[nom_c] = d_extra.strftime("%d/%m/%Y")
             else:
                 st.info("No hay variables extra personalizadas configuradas.")
@@ -566,7 +628,6 @@ if "📊 Consultar y Filtros" in pestañas:
             df_pantalla["fecha_nac"] = df_pantalla["fecha_nac"].apply(formato_fecha_pantalla)
             df_pantalla["fecha_llegada"] = df_pantalla["fecha_llegada"].apply(formato_fecha_pantalla)
             
-            # Renombrar columnas según etiquetas configuradas
             renombrar_dic = {clave: cfg_campos.get(clave, {}).get("etiqueta", clave) for clave in CAMPOS_BASE_DEFAULT.keys()}
             df_pantalla = df_pantalla.rename(columns=renombrar_dic)
 
@@ -579,7 +640,7 @@ if "📊 Consultar y Filtros" in pestañas:
             st.info("No hay registros cargados.")
 
 # -----------------------------------------------------------------------------
-# TAB: EDITAR / ELIMINAR HABITANTE
+# TAB: EDITAR / ELIMINAR HABITANTE (CORREGIDO ERROR FECHA 1938)
 # -----------------------------------------------------------------------------
 if "⚙️ Editar / Eliminar" in pestañas:
     with tabs[pestañas.index("⚙️ Editar / Eliminar")]:
@@ -596,7 +657,6 @@ if "⚙️ Editar / Eliminar" in pestañas:
                 dict_dyn = {}
 
             with st.form("form_edit_unificado"):
-                # 1. DATOS PERSONALES
                 st.markdown("### 👤 Datos Personales")
                 col_e1, col_e2 = st.columns(2)
                 with col_e1:
@@ -605,27 +665,41 @@ if "⚙️ Editar / Eliminar" in pestañas:
                     e_apellidos = renderizar_campo_dinamico("apellidos", cfg_campos, hab['apellidos'], key_suffix="edit")
                 with col_e2:
                     e_sexo = renderizar_campo_dinamico("sexo", cfg_campos, hab['sexo'], key_suffix="edit")
+                    
+                    # AQUÍ ESTABA EL ERROR: Se agregó min_value=datetime(1900, 1, 1)
                     fn_dt = parsear_fecha_bd(hab['fecha_nac'])
                     lbl_fn = cfg_campos.get("fecha_nac", {}).get("etiqueta", "Fecha Nacimiento")
-                    e_fn = st.date_input(f"{lbl_fn}:", value=fn_dt, format="DD/MM/YYYY")
+                    e_fn = st.date_input(
+                        f"{lbl_fn}:", 
+                        value=fn_dt, 
+                        min_value=datetime(1900, 1, 1), 
+                        max_value=datetime.now().date(), 
+                        format="DD/MM/YYYY"
+                    )
+                    
                     e_telefono = renderizar_campo_dinamico("telefono", cfg_campos, hab['telefono'], key_suffix="edit")
 
                 st.markdown("---")
 
-                # 2. UBICACIÓN
                 st.markdown("### 🏠 Ubicación")
                 col_e3, col_e4 = st.columns(2)
                 with col_e3:
                     e_manzana = renderizar_campo_dinamico("manzana", cfg_campos, hab['manzana'], key_suffix="edit")
+                    
                     fl_dt = parsear_fecha_bd(hab['fecha_llegada'])
                     lbl_fl = cfg_campos.get("fecha_llegada", {}).get("etiqueta", "Fecha Llegada")
-                    e_fl = st.date_input(f"{lbl_fl}:", value=fl_dt, format="DD/MM/YYYY")
+                    e_fl = st.date_input(
+                        f"{lbl_fl}:", 
+                        value=fl_dt, 
+                        min_value=datetime(1900, 1, 1), 
+                        max_value=datetime.now().date(), 
+                        format="DD/MM/YYYY"
+                    )
                 with col_e4:
                     e_direccion = renderizar_campo_dinamico("direccion", cfg_campos, hab['direccion'], key_suffix="edit")
 
                 st.markdown("---")
 
-                # 3. SALUD
                 st.markdown("### ⚕️ Salud")
                 col_e5, col_e6 = st.columns(2)
                 with col_e5:
@@ -635,7 +709,6 @@ if "⚙️ Editar / Eliminar" in pestañas:
 
                 st.markdown("---")
 
-                # 4. CAMPOS EXTRA
                 st.markdown("### ➕ Campos Adicionales Extra")
                 e_dict_extra = {}
                 campos_cfg = cargar_campos_personalizados()
@@ -675,7 +748,7 @@ if "⚙️ Editar / Eliminar" in pestañas:
                     st.rerun()
 
 # -----------------------------------------------------------------------------
-# TAB: GESTIÓN DE USUARIOS Y PERMISOS (SOLO MASTER)
+# TAB: GESTIÓN DE USUARIOS
 # -----------------------------------------------------------------------------
 if st.session_state.rol_actual == "Master" and "👥 Usuarios y Permisos" in pestañas:
     with tabs[pestañas.index("👥 Usuarios y Permisos")]:
@@ -706,7 +779,7 @@ if st.session_state.rol_actual == "Master" and "👥 Usuarios y Permisos" in pes
                 u_nombre = st.text_input("Nombre Completo:", value=val_nombre)
                 u_rol = st.selectbox("Rol Asignado:", ["Administrador", "Visualizador"], index=0 if val_rol == "Administrador" else 1)
                 
-                st.markdown("#### 🔑 Tildar Permisos y Módulos Permitidos:")
+                st.markdown("#### 🔑 Permisos:")
                 nuevos_permisos = {}
                 for perm in LISTA_PERMISOS:
                     val_check = perm_actuales.get(perm, False)
@@ -716,10 +789,10 @@ if st.session_state.rol_actual == "Master" and "👥 Usuarios y Permisos" in pes
                     target_user = u_username.strip() if user_sel == "-- Crear Nuevo --" else user_sel
                     if target_user:
                         guardar_usuario(target_user, u_pass, u_nombre.strip(), u_rol, nuevos_permisos)
-                        st.success(f"✅ Usuario {target_user} guardado exitosamente.")
+                        st.success(f"✅ Usuario {target_user} guardado.")
                         st.rerun()
                     else:
-                        st.error("Ingrese un nombre de usuario válido.")
+                        st.error("Ingrese un usuario válido.")
 
         with col_u2:
             st.markdown("### 📋 Usuarios Registrados")
@@ -734,7 +807,7 @@ if st.session_state.rol_actual == "Master" and "👥 Usuarios y Permisos" in pes
                 st.rerun()
 
 # -----------------------------------------------------------------------------
-# TAB: RESPALDOS Y BORRADO TOTAL DEL CENSO
+# TAB: RESPALDOS Y BORRADO TOTAL
 # -----------------------------------------------------------------------------
 if "💾 Respaldos y Borrado" in pestañas:
     with tabs[pestañas.index("💾 Respaldos y Borrado")]:
@@ -798,14 +871,12 @@ if "💾 Respaldos y Borrado" in pestañas:
 
         st.markdown("---")
         st.markdown("### ⚠️ Zona Peligrosa: Borrado Completo del Censo")
-        st.error("Esta acción eliminará de forma permanente TODOS los registros de habitantes del censo y la bitácora.")
-        
         confirmar_borrado = st.checkbox("Confirmo que deseo borrar todos los datos del censo definitivamente.")
         
         if st.button("💣 BORRAR TODO EL CENSO", type="primary", use_container_width=True):
             if confirmar_borrado:
                 borrar_todo_el_censo()
-                st.success("🔥 Se ha vaciado la base de datos del censo por completo.")
+                st.success("🔥 Base de datos vaciada completamente.")
                 st.rerun()
             else:
-                st.warning("Debe tildar la casilla de confirmación para poder vaciar el censo.")
+                st.warning("Marque la casilla para confirmar.")
