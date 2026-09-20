@@ -116,7 +116,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS configuracion_campos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nombre_campo TEXT UNIQUE,
-            tipo_campo TEXT
+            tipo_campo TEXT,
+            opciones_json TEXT DEFAULT '[]'
         )
     """)
     
@@ -288,23 +289,44 @@ def obtener_bitacora_habitante(cedula):
     conn.close()
     return df
 
-# --- CAMPOS ADICIONALES EXTRA ---
+# --- CAMPOS ADICIONALES DINÁMICOS Y PERSONALIZADOS ---
 def cargar_campos_personalizados():
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT nombre_campo, tipo_campo FROM configuracion_campos")
+    cursor.execute("SELECT id, nombre_campo, tipo_campo, opciones_json FROM configuracion_campos")
     filas = cursor.fetchall()
     conn.close()
-    return filas
+    
+    resultado = []
+    for f in filas:
+        try:
+            opciones = json.loads(f[3]) if f[3] else []
+        except:
+            opciones = []
+        resultado.append({
+            "id": f[0],
+            "nombre": f[1],
+            "tipo": f[2],
+            "opciones": opciones
+        })
+    return resultado
 
-def agregar_campo_personalizado(nombre, tipo):
+def agregar_campo_personalizado(nombre, tipo, opciones_lista):
     conn = get_connection()
     cursor = conn.cursor()
+    opciones_json = json.dumps([op.strip() for op in opciones_lista if op.strip()], ensure_ascii=False)
     try:
-        cursor.execute("INSERT INTO configuracion_campos (nombre_campo, tipo_campo) VALUES (?, ?)", (nombre, tipo))
+        cursor.execute("INSERT INTO configuracion_campos (nombre_campo, tipo_campo, opciones_json) VALUES (?, ?, ?)", (nombre, tipo, opciones_json))
         conn.commit()
     except sqlite3.IntegrityError:
         pass
+    conn.close()
+
+def eliminar_campo_personalizado(id_campo):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM configuracion_campos WHERE id = ?", (id_campo,))
+    conn.commit()
     conn.close()
 
 # --- USUARIOS Y PERMISOS ---
@@ -404,7 +426,7 @@ if not st.session_state.autenticado:
 cfg_campos = cargar_configuracion_campos()
 
 # -----------------------------------------------------------------------------
-# 5. BARRA LATERAL
+# 5. BARRA LATERAL (SECCIÓN VARIABLE EXTRA ELIMINADA)
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.title("👤 Perfil de Usuario")
@@ -419,18 +441,6 @@ with st.sidebar:
         st.rerun()
         
     st.markdown("---")
-    
-    if tiene_permiso("personalizar_etiquetas"):
-        st.subheader("➕ Variable Adicional Extra")
-        nuevo_nom = st.text_input("Nombre Variable:")
-        nuevo_tipo = st.selectbox("Tipo de Dato:", ["Texto", "Número", "Fecha"])
-        
-        if st.button("Guardar Variable Extra", use_container_width=True):
-            if nuevo_nom.strip():
-                agregar_campo_personalizado(nuevo_nom.strip(), nuevo_tipo)
-                st.success("Variable creada con éxito.")
-                st.rerun()
-
     st.caption("Sistema de Censo Comunitario v5.5")
 
 # -----------------------------------------------------------------------------
@@ -461,7 +471,7 @@ if not pestañas:
 tabs = st.tabs(pestañas)
 
 # -----------------------------------------------------------------------------
-# TAB: CONSULTAR Y FILTROS (BÚSQUEDA EN TODOS LOS CAMPOS Y DESCARGA)
+# TAB: CONSULTAR Y FILTROS
 # -----------------------------------------------------------------------------
 if "📊 Consultar y Filtros" in pestañas:
     with tabs[pestañas.index("📊 Consultar y Filtros")]:
@@ -472,14 +482,12 @@ if "📊 Consultar y Filtros" in pestañas:
             df["edad_num"] = df["fecha_nac"].apply(calcular_edad)
             df["tiempo_comunidad_num"] = df["fecha_llegada"].apply(calcular_tiempo_comunidad)
             
-            # Buscador global
             col_search1, col_search2 = st.columns([3, 1])
             with col_search1:
                 busqueda = st.text_input("🔍 Buscar en TODOS los campos (Cédula, Nombres, Dirección, Salud, Teléfono, etc.):", placeholder="Escriba cualquier dato para buscar...")
             with col_search2:
                 vista_modo = st.radio("Modo de vista:", ["Tarjetas Visuales", "Tabla Resumida"], horizontal=True)
 
-            # Filtro omnicanal (busca coincidencia en cualquier columna convertida a texto)
             if busqueda.strip():
                 df_filtrado = df[df.apply(lambda row: row.astype(str).str.contains(busqueda, case=False).any(), axis=1)]
             else:
@@ -487,7 +495,6 @@ if "📊 Consultar y Filtros" in pestañas:
 
             st.caption(f"Mostrando {len(df_filtrado)} registro(s) encontrado(s).")
 
-            # --- OPCIÓN DE DESCARGA DE ENCONTRADOS ---
             if not df_filtrado.empty:
                 col_dl1, col_dl2, _ = st.columns([1, 1, 2])
                 with col_dl1:
@@ -519,7 +526,6 @@ if "📊 Consultar y Filtros" in pestañas:
                     
                     with st.expander(f"👤 **{nombre_completo}** — Cédula: `{cedula_curr}` | Manzana: {hab['manzana']}", expanded=bool(busqueda.strip())):
                         
-                        # Indicadores Clave Visuales
                         kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
                         kpi1.metric("🎂 Edad", f"{hab['edad_num']} años")
                         kpi2.metric("🏠 Tiempo Comunidad", f"{hab['tiempo_comunidad_num']} años")
@@ -529,7 +535,6 @@ if "📊 Consultar y Filtros" in pestañas:
 
                         st.markdown("---")
                         
-                        # Detalle en dos columnas
                         col_info1, col_info2 = st.columns(2)
                         with col_info1:
                             st.markdown("##### 📌 Datos Personales y Habitación")
@@ -538,7 +543,7 @@ if "📊 Consultar y Filtros" in pestañas:
                             st.write(f"**Dirección Detallada:** {hab['direccion']}")
 
                         with col_info2:
-                            st.markdown("##### ⚕️ Salud y Variables Adicionales")
+                            st.markdown("##### ⚕️ Salud y Campos Personalizados")
                             st.write(f"**Condición de Salud:** {hab['condicion_salud']}")
                             if hab['detalle_salud']:
                                 st.write(f"**Detalle Salud:** {hab['detalle_salud']}")
@@ -546,7 +551,7 @@ if "📊 Consultar y Filtros" in pestañas:
                             try:
                                 extras = json.loads(hab['campos_adicionales'])
                                 if extras:
-                                    st.markdown("**Variables Adicionales:**")
+                                    st.markdown("**Campos Adicionales:**")
                                     for k_ext, v_ext in extras.items():
                                         st.write(f"- *{k_ext}:* {v_ext}")
                             except:
@@ -554,7 +559,6 @@ if "📊 Consultar y Filtros" in pestañas:
 
                         st.markdown("---")
                         
-                        # Botones de Acción Directos
                         btn_col1, btn_col2, _ = st.columns([1, 1, 3])
                         
                         if tiene_permiso("editar_habitantes"):
@@ -569,7 +573,6 @@ if "📊 Consultar y Filtros" in pestañas:
                                     st.success(f"Habitante con cédula {cedula_curr} eliminado.")
                                     st.rerun()
 
-                        # Formulario In-Situ para Editar Datos
                         if st.session_state.get(f"modo_edit_{cedula_curr}", False):
                             st.markdown("---")
                             st.subheader(f"🛠️ Editar Datos de {nombre_completo}")
@@ -583,7 +586,6 @@ if "📊 Consultar y Filtros" in pestañas:
                                     e_tel = st.text_input("Teléfono:", value=hab['telefono'])
                                 with col_ins2:
                                     e_sex = st.selectbox("Sexo:", ["Femenino", "Masculino", "Otro"], index=0 if hab['sexo']=="Femenino" else (1 if hab['sexo']=="Masculino" else 2))
-                                    # LÍMITE DESDE 1900 APLICADO AQUÍ
                                     e_fn = st.date_input(
                                         "Fecha Nacimiento:", 
                                         value=parsear_fecha_bd(hab['fecha_nac']), 
@@ -617,7 +619,6 @@ if "📊 Consultar y Filtros" in pestañas:
                                     st.rerun()
 
             else:
-                # VISTA TABULAR COMPACTA
                 df_tabla = df_filtrado.copy()
                 df_tabla["Edad"] = df_tabla["edad_num"]
                 df_tabla["Años Comunidad"] = df_tabla["tiempo_comunidad_num"]
@@ -630,7 +631,7 @@ if "📊 Consultar y Filtros" in pestañas:
             st.info("No hay registros cargados en la base de datos.")
 
 # -----------------------------------------------------------------------------
-# TAB: BITÁCORA DE DOCUMENTOS (CONSTANCIAS / CARTAS)
+# TAB: BITÁCORA DE DOCUMENTOS
 # -----------------------------------------------------------------------------
 if "📜 Bitácora de Documentos" in pestañas:
     with tabs[pestañas.index("📜 Bitácora de Documentos")]:
@@ -697,7 +698,6 @@ if "📝 Registrar Habitante" in pestañas:
             with col2:
                 sexo = renderizar_campo_dinamico("sexo", cfg_campos, key_suffix="reg")
                 lbl_fn = cfg_campos.get("fecha_nac", {}).get("etiqueta", "Fecha de Nacimiento")
-                # LÍMITE DESDE 1900 APLICADO AQUÍ
                 fecha_nac = st.date_input(
                     f"{lbl_fn} (DD/MM/YYYY)", 
                     min_value=datetime(1900, 1, 1).date(), 
@@ -735,27 +735,22 @@ if "📝 Registrar Habitante" in pestañas:
 
             st.markdown("---")
 
-            st.markdown("### ➕ Campos Adicionales Personalizados")
+            # SECCIÓN DE CAMPOS CREADOS POR EL USUARIO
             campos_config = cargar_campos_personalizados()
             if campos_config:
+                st.markdown("### ➕ Campos Personalizados Agregados")
                 col_c1, col_c2 = st.columns(2)
-                for idx, (nom_c, tipo_c) in enumerate(campos_config):
+                for idx, c_item in enumerate(campos_config):
+                    nom_c = c_item["nombre"]
+                    tipo_c = c_item["tipo"]
+                    ops_c = c_item["opciones"]
+                    
                     target_col = col_c1 if idx % 2 == 0 else col_c2
                     with target_col:
-                        if tipo_c == "Texto":
-                            datos_extra[nom_c] = st.text_input(f"{nom_c}:")
-                        elif tipo_c == "Número":
-                            datos_extra[nom_c] = st.number_input(f"{nom_c}:", value=0)
-                        elif tipo_c == "Fecha":
-                            d_extra = st.date_input(
-                                f"{nom_c} (DD/MM/YYYY):", 
-                                min_value=datetime(1900, 1, 1).date(), 
-                                max_value=datetime.now().date(), 
-                                format="DD/MM/YYYY"
-                            )
-                            datos_extra[nom_c] = d_extra.strftime("%d/%m/%Y")
-            else:
-                st.info("No hay variables extra personalizadas configuradas.")
+                        if tipo_c == "Desplegable" and ops_c:
+                            datos_extra[nom_c] = st.selectbox(f"{nom_c}:", options=ops_c, key=f"reg_cust_{c_item['id']}")
+                        else:
+                            datos_extra[nom_c] = st.text_input(f"{nom_c}:", key=f"reg_cust_{c_item['id']}")
 
             st.markdown("---")
             guardar = st.form_submit_button("💾 Guardar Registro de Habitante", type="primary", use_container_width=True)
@@ -785,7 +780,6 @@ if "📈 Estadísticas" in pestañas:
         if not df_stat.empty:
             df_stat["edad"] = df_stat["fecha_nac"].apply(calcular_edad)
             
-            # Clasificación de rangos de edad
             def clasificar_rango_edad(edad):
                 if edad <= 12: return "0 a 12 años"
                 elif 13 <= edad <= 15: return "13 a 15 años"
@@ -795,7 +789,6 @@ if "📈 Estadísticas" in pestañas:
             
             df_stat["rango_etario"] = df_stat["edad"].apply(clasificar_rango_edad)
             
-            # Filtro por Sexo opcional
             st.markdown("##### 🔍 Filtrar Estadísticas por Sexo")
             opciones_sexo = ["Todos"] + list(df_stat["sexo"].unique())
             sexo_filtro = st.selectbox("Seleccione para filtrar las métricas:", opciones_sexo)
@@ -807,7 +800,6 @@ if "📈 Estadísticas" in pestañas:
 
             st.markdown("---")
             
-            # Métricas
             kpi_e1, kpi_e2, kpi_e3, kpi_e4, kpi_e5 = st.columns(5)
             kpi_e1.metric("Población Seleccionada", len(df_stat_calc))
             kpi_e2.metric("Niños (0 a 12 años)", len(df_stat_calc[df_stat_calc["edad"] <= 12]))
@@ -867,20 +859,66 @@ if "📈 Estadísticas" in pestañas:
             st.info("📊 No hay datos suficientes para generar estadísticas.")
 
 # -----------------------------------------------------------------------------
-# TAB: PERSONALIZAR FORMULARIO
+# TAB: PERSONALIZAR FORMULARIO (NUEVOS CAMPOS Y DESPLEGABLES AQUÍ)
 # -----------------------------------------------------------------------------
 if "✏️ Personalizar Formulario" in pestañas:
     with tabs[pestañas.index("✏️ Personalizar Formulario")]:
-        st.subheader("✏️ Configurar Campos y Listas Desplegables del Formulario")
+        st.subheader("✏️ Personalizar Formulario de Registro")
         
+        # --- SECCIÓN 1: CREAR NUEVOS CAMPOS ---
+        st.markdown("### ➕ Crear Nuevo Campo Personalizado")
+        with st.form("form_crear_nuevo_campo"):
+            col_nc1, col_nc2, col_nc3 = st.columns([2, 1.5, 3])
+            with col_nc1:
+                nom_nuevo = st.text_input("Nombre del Nuevo Campo (ej: Nivel Educativo, Profesión):")
+            with col_nc2:
+                tipo_nuevo = st.selectbox("Tipo de Campo:", ["Texto", "Desplegable"])
+            with col_nc3:
+                ops_nuevo = st.text_input("Opciones si es Desplegable (separadas por comas):", placeholder="Opción 1, Opción 2, Opción 3")
+                
+            btn_crear_campo = st.form_submit_button("➕ Añadir Campo al Formulario", type="primary", use_container_width=True)
+            
+            if btn_crear_campo:
+                if nom_nuevo.strip():
+                    lista_ops = [x.strip() for x in ops_nuevo.split(",") if x.strip()]
+                    agregar_campo_personalizado(nom_nuevo.strip(), tipo_nuevo, lista_ops)
+                    st.success(f"✅ Campo '{nom_nuevo.strip()}' creado con éxito.")
+                    st.rerun()
+                else:
+                    st.error("Ingrese el nombre del nuevo campo.")
+
+        # --- GESTIONAR CAMPOS CREADOS ---
+        lista_campos_cust = cargar_campos_personalizados()
+        if lista_campos_cust:
+            st.markdown("#### 📋 Campos Personalizados Creados")
+            for c_cust in lista_campos_cust:
+                c_id = c_cust["id"]
+                c_nom = c_cust["nombre"]
+                c_tipo = c_cust["tipo"]
+                c_ops = ", ".join(c_cust["opciones"]) if c_cust["opciones"] else "N/A"
+                
+                col_m1, col_m2, col_m3, col_m4 = st.columns([2, 1, 3, 1])
+                col_m1.write(f"**{c_nom}**")
+                col_m2.write(f"`{c_tipo}`")
+                col_m3.write(f"Opciones: *{c_ops}*")
+                with col_m4:
+                    if st.button("🗑️ Eliminar", key=f"del_cust_{c_id}", type="primary"):
+                        eliminar_campo_personalizado(c_id)
+                        st.success("Campo eliminado.")
+                        st.rerun()
+
+        st.markdown("---")
+
+        # --- SECCIÓN 2: CONFIGURAR CAMPOS BASE ---
+        st.markdown("### ⚙️ Configurar Campos Base Predeterminados")
         with st.form("form_config_campos_avanzado"):
             for clave, (etiqueta_def, tipo_def, opciones_def) in CAMPOS_BASE_DEFAULT.items():
-                st.markdown(f"#### ⚙️ Campo: `{clave}`")
+                st.markdown(f"##### Campo: `{clave}`")
                 c_data = cfg_campos.get(clave, {"etiqueta": etiqueta_def, "tipo_control": tipo_def, "opciones": json.loads(opciones_def)})
                 
                 col_c1, col_c2, col_c3 = st.columns([2, 1.5, 3])
                 with col_c1:
-                    st.text_input(f"Nombre del campo ({clave}):", value=c_data["etiqueta"], key=f"cfg_lbl_{clave}")
+                    st.text_input(f"Etiqueta visible ({clave}):", value=c_data["etiqueta"], key=f"cfg_lbl_{clave}")
                 with col_c2:
                     st.selectbox(
                         "Tipo de control:",
@@ -897,7 +935,7 @@ if "✏️ Personalizar Formulario" in pestañas:
                     )
                 st.markdown("---")
 
-            if st.form_submit_button("💾 Guardar Toda la Configuración del Formulario", type="primary", use_container_width=True):
+            if st.form_submit_button("💾 Guardar Configuración de Campos Base", type="primary", use_container_width=True):
                 for clave in CAMPOS_BASE_DEFAULT.keys():
                     etiq_val = st.session_state[f"cfg_lbl_{clave}"].strip()
                     tipo_ctrl_val = st.session_state[f"cfg_tipo_{clave}"]
