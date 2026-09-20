@@ -456,7 +456,7 @@ def renderizar_campo_dinamico(key_campo, cfg_dict, valor_previo="", key_suffix="
         return st.text_input(f"{etiqueta}:", value=str(valor_previo), key=f"{key_campo}_{key_suffix}")
 
 # -----------------------------------------------------------------------------
-# 4. CONTROL DE SESIÓN Y LOGIN
+# 4. CONTROL DE SESIÓN Y LOGIN (SIN FORMULARIO DE ENVÍO CON ENTER)
 # -----------------------------------------------------------------------------
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
@@ -469,26 +469,25 @@ if not st.session_state.autenticado:
     
     _, col_center, _ = st.columns([1, 2, 1])
     with col_center:
-        with st.form("form_login"):
-            usuario = st.text_input("Usuario")
-            clave = st.text_input("Contraseña", type="password")
-            btn_login = st.form_submit_button("Ingresar al Sistema", use_container_width=True)
-            
-            if btn_login:
-                user_data = verificar_login(usuario, clave)
-                if user_data:
-                    st.session_state.autenticado = True
-                    st.session_state.username = user_data[0]
-                    st.session_state.usuario_actual = user_data[1]
-                    st.session_state.rol_actual = user_data[2]
-                    try:
-                        st.session_state.permisos_usuario = json.loads(user_data[3])
-                    except Exception:
-                        st.session_state.permisos_usuario = {}
-                    st.success(f"¡Bienvenido {user_data[1]}!")
-                    st.rerun()
-                else:
-                    st.error("❌ Credenciales incorrectas.")
+        usuario = st.text_input("Usuario")
+        clave = st.text_input("Contraseña", type="password")
+        btn_login = st.button("Ingresar al Sistema", use_container_width=True, type="primary")
+        
+        if btn_login:
+            user_data = verificar_login(usuario, clave)
+            if user_data:
+                st.session_state.autenticado = True
+                st.session_state.username = user_data[0]
+                st.session_state.usuario_actual = user_data[1]
+                st.session_state.rol_actual = user_data[2]
+                try:
+                    st.session_state.permisos_usuario = json.loads(user_data[3])
+                except Exception:
+                    st.session_state.permisos_usuario = {}
+                st.success(f"¡Bienvenido {user_data[1]}!")
+                st.rerun()
+            else:
+                st.error("❌ Credenciales incorrectas.")
     st.stop()
 
 # -----------------------------------------------------------------------------
@@ -539,7 +538,7 @@ if not pestañas:
 tabs = st.tabs(pestañas)
 
 # -----------------------------------------------------------------------------
-# TAB: CONSULTAR Y FILTROS (MOSTRANDO FAMILIARES ASOCIADOS AL JEFE DE FAMILIA)
+# TAB: CONSULTAR Y FILTROS
 # -----------------------------------------------------------------------------
 if "📊 Consultar y Filtros" in pestañas:
     with tabs[pestañas.index("📊 Consultar y Filtros")]:
@@ -608,10 +607,8 @@ if "📊 Consultar y Filtros" in pestañas:
                     es_jefe_flag = (hab['es_jefe_hogar'] == 1)
                     rol_familiar = "👑 JEFE DE HOGAR" if es_jefe_flag else "👨‍👩‍👧‍👦 Cargas / Familiar"
                     
-                    # MODIFICACIÓN 1: Mostrar personas asociadas cuando es Jefe de Hogar
                     cargas_asociadas = df[df["jefe_hogar_cedula"] == cedula_curr] if es_jefe_flag else pd.DataFrame()
                     num_cargas = len(cargas_asociadas)
-                    
                     badge_cargas = f" | 👨‍👩‍👧‍👦 {num_cargas} Familiar(es) a cargo" if es_jefe_flag else ""
                     
                     with st.expander(f"👤 **{nombre_completo}** (`{rol_familiar}`) — C.I: `{cedula_curr}` | Manzana: {hab['manzana']}{badge_cargas}", expanded=bool(busqueda.strip() or jefe_filtro_sel != "TODOS")):
@@ -655,7 +652,6 @@ if "📊 Consultar y Filtros" in pestañas:
                             except Exception:
                                 pass
 
-                        # DESPLIEGUE DIRECTO DE PERSONAS ASOCIADAS AL JEFE DE FAMILIA
                         if es_jefe_flag:
                             st.markdown("---")
                             st.markdown(f"##### 👨‍👩‍👧‍👦 Cargas / Familiares Vinculados a {nombre_completo} ({num_cargas})")
@@ -695,61 +691,62 @@ if "📊 Consultar y Filtros" in pestañas:
                             st.markdown("---")
                             st.subheader(f"🛠️ Editar Datos de {nombre_completo}")
                             
-                            with st.form(key=f"form_insitu_edit_{cedula_curr}"):
-                                col_ins1, col_ins2 = st.columns(2)
-                                with col_ins1:
-                                    e_ced = st.text_input("Cédula:", value=hab['cedula'])
-                                    e_nom = st.text_input("Nombres:", value=hab['nombres'])
-                                    e_ape = st.text_input("Apellidos:", value=hab['apellidos'])
-                                    e_tel = st.text_input("Teléfono:", value=hab['telefono'])
-                                with col_ins2:
-                                    e_sex = st.selectbox("Sexo:", ["Femenino", "Masculino", "Otro"], index=0 if hab['sexo']=="Femenino" else (1 if hab['sexo']=="Masculino" else 2))
-                                    e_fn = st.date_input(
-                                        "Fecha Nacimiento:", 
-                                        value=parsear_fecha_bd(hab['fecha_nac']), 
-                                        min_value=datetime(1900, 1, 1).date(), 
-                                        max_value=datetime.now().date(), 
-                                        format="DD/MM/YYYY"
-                                    )
-                                    e_fl = st.date_input(
-                                        "Fecha Llegada:", 
-                                        value=parsear_fecha_bd(hab['fecha_llegada']), 
-                                        min_value=datetime(1900, 1, 1).date(), 
-                                        max_value=datetime.now().date(), 
-                                        format="DD/MM/YYYY"
-                                    )
-                                
-                                e_es_jefe = st.checkbox("¿Es Jefe de Hogar?", value=bool(hab['es_jefe_hogar']))
-                                e_jefe_ced = ""
-                                if not e_es_jefe:
-                                    jefes_disp = obtener_jefes_hogar()
-                                    ops_jefes_edit = [("", "-- Seleccionar Jefe de Hogar --")] + [(j[0], f"{j[1]} {j[2]} ({j[0]})") for j in jefes_disp if j[0] != cedula_curr]
-                                    idx_jefe = 0
-                                    for i_j, o_j in enumerate(ops_jefes_edit):
-                                        if o_j[0] == hab['jefe_hogar_cedula']:
-                                            idx_jefe = i_j
-                                            break
-                                    sel_jefe_edit = st.selectbox("Vincular a Jefe de Hogar:", [o[0] for o in ops_jefes_edit], index=idx_jefe, format_func=lambda c: dict(ops_jefes_edit).get(c, c))
-                                    e_jefe_ced = sel_jefe_edit
+                            col_ins1, col_ins2 = st.columns(2)
+                            with col_ins1:
+                                e_ced = st.text_input("Cédula:", value=hab['cedula'], key=f"e_ced_{cedula_curr}")
+                                e_nom = st.text_input("Nombres:", value=hab['nombres'], key=f"e_nom_{cedula_curr}")
+                                e_ape = st.text_input("Apellidos:", value=hab['apellidos'], key=f"e_ape_{cedula_curr}")
+                                e_tel = st.text_input("Teléfono:", value=hab['telefono'], key=f"e_tel_{cedula_curr}")
+                            with col_ins2:
+                                e_sex = st.selectbox("Sexo:", ["Femenino", "Masculino", "Otro"], index=0 if hab['sexo']=="Femenino" else (1 if hab['sexo']=="Masculino" else 2), key=f"e_sex_{cedula_curr}")
+                                e_fn = st.date_input(
+                                    "Fecha Nacimiento:", 
+                                    value=parsear_fecha_bd(hab['fecha_nac']), 
+                                    min_value=datetime(1900, 1, 1).date(), 
+                                    max_value=datetime.now().date(), 
+                                    format="DD/MM/YYYY",
+                                    key=f"e_fn_{cedula_curr}"
+                                )
+                                e_fl = st.date_input(
+                                    "Fecha Llegada:", 
+                                    value=parsear_fecha_bd(hab['fecha_llegada']), 
+                                    min_value=datetime(1900, 1, 1).date(), 
+                                    max_value=datetime.now().date(), 
+                                    format="DD/MM/YYYY",
+                                    key=f"e_fl_{cedula_curr}"
+                                )
+                            
+                            e_es_jefe = st.checkbox("¿Es Jefe de Hogar?", value=bool(hab['es_jefe_hogar']), key=f"e_es_jefe_{cedula_curr}")
+                            e_jefe_ced = ""
+                            if not e_es_jefe:
+                                jefes_disp = obtener_jefes_hogar()
+                                ops_jefes_edit = [("", "-- Seleccionar Jefe de Hogar --")] + [(j[0], f"{j[1]} {j[2]} ({j[0]})") for j in jefes_disp if j[0] != cedula_curr]
+                                idx_jefe = 0
+                                for i_j, o_j in enumerate(ops_jefes_edit):
+                                    if o_j[0] == hab['jefe_hogar_cedula']:
+                                        idx_jefe = i_j
+                                        break
+                                sel_jefe_edit = st.selectbox("Vincular a Jefe de Hogar:", [o[0] for o in ops_jefes_edit], index=idx_jefe, format_func=lambda c: dict(ops_jefes_edit).get(c, c), key=f"e_jefe_sel_{cedula_curr}")
+                                e_jefe_ced = sel_jefe_edit
 
-                                e_man = st.text_input("Manzana:", value=hab['manzana'])
-                                e_dir = st.text_area("Dirección:", value=hab['direccion'])
-                                e_sal = st.text_input("Condición Salud:", value=hab['condicion_salud'])
-                                e_detsal = st.text_input("Detalle Salud:", value=hab['detalle_salud'])
-                                
-                                if st.form_submit_button("💾 Guardar Cambios", type="primary", use_container_width=True):
-                                    datos_actualizados = (
-                                        e_ced.strip(), e_nom.strip(), e_ape.strip(), e_sex,
-                                        e_fn.strftime("%Y-%m-%d"), e_fl.strftime("%Y-%m-%d"),
-                                        e_dir.strip(), e_man.strip(), e_tel.strip(),
-                                        e_sal.strip(), e_detsal.strip(),
-                                        1 if e_es_jefe else 0, e_jefe_ced,
-                                        hab['campos_adicionales']
-                                    )
-                                    actualizar_habitante_completo(cedula_curr, datos_actualizados)
-                                    st.session_state[f"modo_edit_{cedula_curr}"] = False
-                                    st.success("✅ Cambios guardados correctamente.")
-                                    st.rerun()
+                            e_man = st.text_input("Manzana:", value=hab['manzana'], key=f"e_man_{cedula_curr}")
+                            e_dir = st.text_area("Dirección:", value=hab['direccion'], key=f"e_dir_{cedula_curr}")
+                            e_sal = st.text_input("Condición Salud:", value=hab['condicion_salud'], key=f"e_sal_{cedula_curr}")
+                            e_detsal = st.text_input("Detalle Salud:", value=hab['detalle_salud'], key=f"e_detsal_{cedula_curr}")
+                            
+                            if st.button("💾 Guardar Cambios", key=f"btn_save_insitu_{cedula_curr}", type="primary", use_container_width=True):
+                                datos_actualizados = (
+                                    e_ced.strip(), e_nom.strip(), e_ape.strip(), e_sex,
+                                    e_fn.strftime("%Y-%m-%d"), e_fl.strftime("%Y-%m-%d"),
+                                    e_dir.strip(), e_man.strip(), e_tel.strip(),
+                                    e_sal.strip(), e_detsal.strip(),
+                                    1 if e_es_jefe else 0, e_jefe_ced,
+                                    hab['campos_adicionales']
+                                )
+                                actualizar_habitante_completo(cedula_curr, datos_actualizados)
+                                st.session_state[f"modo_edit_{cedula_curr}"] = False
+                                st.success("✅ Cambios guardados correctamente.")
+                                st.rerun()
 
             else:
                 df_tabla = df_filtrado.copy()
@@ -783,22 +780,21 @@ if "📜 Bitácora de Documentos" in pestañas:
                     format_func=lambda c: f"{c} - {df_bit[df_bit['cedula']==c]['nombres'].values[0]} {df_bit[df_bit['cedula']==c]['apellidos'].values[0]}"
                 )
                 
-                with st.form("form_registro_bitacora", clear_on_submit=True):
-                    tipo_doc = st.selectbox("Tipo de Documento:", [
-                        "Constancia de Residencia",
-                        "Carta de Buena Conducta",
-                        "Constancia de Soltería",
-                        "Permiso de Mudanza",
-                        "Aval Comunitario",
-                        "Otro Documento"
-                    ])
-                    desc_doc = st.text_area("Observaciones / Detalles del Trámite:")
-                    btn_bit = st.form_submit_button("📜 Registrar en Bitácora", type="primary", use_container_width=True)
-                    
-                    if btn_bit:
-                        registrar_documento_bitacora(habitante_sel, tipo_doc, desc_doc.strip(), st.session_state.usuario_actual)
-                        st.success("✅ Trámite registrado en la bitácora del habitante.")
-                        st.rerun()
+                tipo_doc = st.selectbox("Tipo de Documento:", [
+                    "Constancia de Residencia",
+                    "Carta de Buena Conducta",
+                    "Constancia de Soltería",
+                    "Permiso de Mudanza",
+                    "Aval Comunitario",
+                    "Otro Documento"
+                ], key="bit_tipo_doc")
+                desc_doc = st.text_area("Observaciones / Detalles del Trámite:", key="bit_desc_doc")
+                btn_bit = st.button("📜 Registrar en Bitácora", type="primary", use_container_width=True)
+                
+                if btn_bit:
+                    registrar_documento_bitacora(habitante_sel, tipo_doc, desc_doc.strip(), st.session_state.usuario_actual)
+                    st.success("✅ Trámite registrado en la bitácora del habitante.")
+                    st.rerun()
 
             with col_b2:
                 st.markdown(f"### 📑 Historial de Trámites del Habitante (`Cédula: {habitante_sel}`)")
@@ -822,94 +818,96 @@ if "📝 Registrar Habitante" in pestañas:
         
         datos_extra = {}
         
-        with st.form("form_censo_unificado", clear_on_submit=True):
-            st.markdown("### 👤 Datos Personales e Identificación")
-            col1, col2 = st.columns(2)
-            with col1:
-                cedula = renderizar_campo_dinamico("cedula", cfg_campos, key_suffix="reg")
-                nombres = renderizar_campo_dinamico("nombres", cfg_campos, key_suffix="reg")
-                apellidos = renderizar_campo_dinamico("apellidos", cfg_campos, key_suffix="reg")
-            with col2:
-                sexo = renderizar_campo_dinamico("sexo", cfg_campos, key_suffix="reg")
-                lbl_fn = cfg_campos.get("fecha_nac", {}).get("etiqueta", "Fecha de Nacimiento")
-                fecha_nac = st.date_input(
-                    f"{lbl_fn} (DD/MM/YYYY)", 
-                    min_value=datetime(1900, 1, 1).date(), 
-                    max_value=datetime.now().date(), 
-                    value=datetime(1990, 1, 1).date(), 
-                    format="DD/MM/YYYY"
-                )
-                telefono = renderizar_campo_dinamico("telefono", cfg_campos, key_suffix="reg")
+        st.markdown("### 👤 Datos Personales e Identificación")
+        col1, col2 = st.columns(2)
+        with col1:
+            cedula = renderizar_campo_dinamico("cedula", cfg_campos, key_suffix="reg")
+            nombres = renderizar_campo_dinamico("nombres", cfg_campos, key_suffix="reg")
+            apellidos = renderizar_campo_dinamico("apellidos", cfg_campos, key_suffix="reg")
+        with col2:
+            sexo = renderizar_campo_dinamico("sexo", cfg_campos, key_suffix="reg")
+            lbl_fn = cfg_campos.get("fecha_nac", {}).get("etiqueta", "Fecha de Nacimiento")
+            fecha_nac = st.date_input(
+                f"{lbl_fn} (DD/MM/YYYY)", 
+                min_value=datetime(1900, 1, 1).date(), 
+                max_value=datetime.now().date(), 
+                value=datetime(1990, 1, 1).date(), 
+                format="DD/MM/YYYY",
+                key="reg_fn_key"
+            )
+            telefono = renderizar_campo_dinamico("telefono", cfg_campos, key_suffix="reg")
 
-            st.markdown("---")
+        st.markdown("---")
 
-            st.markdown("### 👨‍👩‍👧‍👦 Núcleo Familiar")
-            col_f1, col_f2 = st.columns(2)
-            with col_f1:
-                es_jefe = st.checkbox("¿Es el Jefe de Hogar?", value=False, help="Marque si esta persona encabeza la familia")
-            
-            jefe_seleccionado_cedula = ""
-            with col_f2:
-                if not es_jefe:
-                    jefes_existentes = obtener_jefes_hogar()
-                    if jefes_existentes:
-                        opciones_jefes = [("", "-- Seleccionar Jefe de Hogar --")] + [(j[0], f"{j[1]} {j[2]} ({j[0]})") for j in jefes_existentes]
-                        sel_jefe = st.selectbox(
-                            "Seleccionar Jefe de Hogar vinculado:",
-                            options=[op[0] for op in opciones_jefes],
-                            format_func=lambda code: dict(opciones_jefes).get(code, code),
-                            help="Busca en la base de datos a las personas marcadas como Jefe de hogar"
-                        )
-                        jefe_seleccionado_cedula = sel_jefe
+        st.markdown("### 👨‍👩‍👧‍👦 Núcleo Familiar")
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            es_jefe = st.checkbox("¿Es el Jefe de Hogar?", value=False, help="Marque si esta persona encabeza la familia", key="reg_es_jefe_key")
+        
+        jefe_seleccionado_cedula = ""
+        with col_f2:
+            if not es_jefe:
+                jefes_existentes = obtener_jefes_hogar()
+                if jefes_existentes:
+                    opciones_jefes = [("", "-- Seleccionar Jefe de Hogar --")] + [(j[0], f"{j[1]} {j[2]} ({j[0]})") for j in jefes_existentes]
+                    sel_jefe = st.selectbox(
+                        "Seleccionar Jefe de Hogar vinculado:",
+                        options=[op[0] for op in opciones_jefes],
+                        format_func=lambda code: dict(opciones_jefes).get(code, code),
+                        help="Busca en la base de datos a las personas marcadas como Jefe de hogar",
+                        key="reg_sel_jefe_key"
+                    )
+                    jefe_seleccionado_cedula = sel_jefe
+                else:
+                    st.info("ℹ️ No hay Jefes de Hogar registrados aún. Puede registrar primero al Jefe de Hogar.")
+
+        st.markdown("---")
+
+        st.markdown("### 🏠 Ubicación y Vivienda")
+        col3, col4 = st.columns(2)
+        with col3:
+            manzana = renderizar_campo_dinamico("manzana", cfg_campos, key_suffix="reg")
+            lbl_fl = cfg_campos.get("fecha_llegada", {}).get("etiqueta", "Fecha de Llegada")
+            fecha_llegada = st.date_input(
+                f"{lbl_fl} (DD/MM/YYYY)", 
+                min_value=datetime(1900, 1, 1).date(), 
+                max_value=datetime.now().date(), 
+                value=datetime(2010, 1, 1).date(), 
+                format="DD/MM/YYYY",
+                key="reg_fl_key"
+            )
+        with col4:
+            direccion = renderizar_campo_dinamico("direccion", cfg_campos, key_suffix="reg")
+
+        st.markdown("---")
+
+        st.markdown("### ⚕️ Salud y Vulnerabilidad")
+        col5, col6 = st.columns(2)
+        with col5:
+            condicion_salud = renderizar_campo_dinamico("condicion_salud", cfg_campos, key_suffix="reg")
+        with col6:
+            detalle_salud = renderizar_campo_dinamico("detalle_salud", cfg_campos, key_suffix="reg")
+
+        st.markdown("---")
+
+        campos_config = cargar_campos_personalizados()
+        if campos_config:
+            st.markdown("### ➕ Campos Personalizados Agregados")
+            col_c1, col_c2 = st.columns(2)
+            for idx, c_item in enumerate(campos_config):
+                nom_c = c_item["nombre"]
+                tipo_c = c_item["tipo"]
+                ops_c = c_item["opciones"]
+                
+                target_col = col_c1 if idx % 2 == 0 else col_c2
+                with target_col:
+                    if tipo_c == "Desplegable" and ops_c:
+                        datos_extra[nom_c] = st.selectbox(f"{nom_c}:", options=ops_c, key=f"reg_cust_{c_item['id']}")
                     else:
-                        st.info("ℹ️ No hay Jefes de Hogar registrados aún. Puede registrar primero al Jefe de Hogar.")
+                        datos_extra[nom_c] = st.text_input(f"{nom_c}:", key=f"reg_cust_{c_item['id']}")
 
-            st.markdown("---")
-
-            st.markdown("### 🏠 Ubicación y Vivienda")
-            col3, col4 = st.columns(2)
-            with col3:
-                manzana = renderizar_campo_dinamico("manzana", cfg_campos, key_suffix="reg")
-                lbl_fl = cfg_campos.get("fecha_llegada", {}).get("etiqueta", "Fecha de Llegada")
-                fecha_llegada = st.date_input(
-                    f"{lbl_fl} (DD/MM/YYYY)", 
-                    min_value=datetime(1900, 1, 1).date(), 
-                    max_value=datetime.now().date(), 
-                    value=datetime(2010, 1, 1).date(), 
-                    format="DD/MM/YYYY"
-                )
-            with col4:
-                direccion = renderizar_campo_dinamico("direccion", cfg_campos, key_suffix="reg")
-
-            st.markdown("---")
-
-            st.markdown("### ⚕️ Salud y Vulnerabilidad")
-            col5, col6 = st.columns(2)
-            with col5:
-                condicion_salud = renderizar_campo_dinamico("condicion_salud", cfg_campos, key_suffix="reg")
-            with col6:
-                detalle_salud = renderizar_campo_dinamico("detalle_salud", cfg_campos, key_suffix="reg")
-
-            st.markdown("---")
-
-            campos_config = cargar_campos_personalizados()
-            if campos_config:
-                st.markdown("### ➕ Campos Personalizados Agregados")
-                col_c1, col_c2 = st.columns(2)
-                for idx, c_item in enumerate(campos_config):
-                    nom_c = c_item["nombre"]
-                    tipo_c = c_item["tipo"]
-                    ops_c = c_item["opciones"]
-                    
-                    target_col = col_c1 if idx % 2 == 0 else col_c2
-                    with target_col:
-                        if tipo_c == "Desplegable" and ops_c:
-                            datos_extra[nom_c] = st.selectbox(f"{nom_c}:", options=ops_c, key=f"reg_cust_{c_item['id']}")
-                        else:
-                            datos_extra[nom_c] = st.text_input(f"{nom_c}:", key=f"reg_cust_{c_item['id']}")
-
-            st.markdown("---")
-            guardar = st.form_submit_button("💾 Guardar Registro de Habitante", type="primary", use_container_width=True)
+        st.markdown("---")
+        guardar = st.button("💾 Guardar Registro de Habitante", type="primary", use_container_width=True)
 
         if guardar:
             if str(nombres).strip() and str(apellidos).strip() and str(cedula).strip():
@@ -923,11 +921,12 @@ if "📝 Registrar Habitante" in pestañas:
                 )
                 guardar_habitante(datos)
                 st.success(f"✅ Registro de {nombres} {apellidos} guardado exitosamente.")
+                st.rerun()
             else:
                 st.error("⚠️ Ingrese los campos obligatorios.")
 
 # -----------------------------------------------------------------------------
-# TAB: ESTADÍSTICAS (SECCIÓN DE JEFES DE FAMILIA REGISTRADOS)
+# TAB: ESTADÍSTICAS
 # -----------------------------------------------------------------------------
 if "📈 Estadísticas" in pestañas:
     with tabs[pestañas.index("📈 Estadísticas")]:
@@ -937,13 +936,11 @@ if "📈 Estadísticas" in pestañas:
         if not df_stat.empty:
             df_stat["edad"] = df_stat["fecha_nac"].apply(calcular_edad)
             
-            # MODIFICACIÓN 2: SECCIÓN DE ESTADÍSTICAS DE JEFES DE FAMILIA REGISTRADOS
             st.markdown("### 👑 Jefes de Familia Registrados")
             df_jefes = df_stat[df_stat["es_jefe_hogar"] == 1].copy()
             total_jefes = len(df_jefes)
             
             if total_jefes > 0:
-                # Conteo de integrantes vinculados por cada Jefe
                 conteo_cargas = df_stat[df_stat["jefe_hogar_cedula"] != ""].groupby("jefe_hogar_cedula").size().to_dict()
                 df_jefes["cargas_count"] = df_jefes["cedula"].map(conteo_cargas).fillna(0).astype(int)
                 
@@ -1060,25 +1057,24 @@ if "✏️ Personalizar Formulario" in pestañas:
         st.subheader("✏️ Gestión Completa de Campos Personalizados y Etiquetas")
         
         st.markdown("### ➕ Añadir Nuevo Campo Personalizado")
-        with st.form("form_crear_nuevo_campo"):
-            col_nc1, col_nc2, col_nc3 = st.columns([2, 1.5, 3])
-            with col_nc1:
-                nom_nuevo = st.text_input("Nombre del Campo:", placeholder="Ej: Nivel Educativo, Ocupación...")
-            with col_nc2:
-                tipo_nuevo = st.selectbox("Tipo de Dato:", ["Texto", "Desplegable"])
-            with col_nc3:
-                ops_nuevo = st.text_input("Opciones si es Desplegable (separadas por comas):", placeholder="Opción 1, Opción 2, Opción 3")
-                
-            btn_crear_campo = st.form_submit_button("➕ Añadir Campo", type="primary", use_container_width=True)
+        col_nc1, col_nc2, col_nc3 = st.columns([2, 1.5, 3])
+        with col_nc1:
+            nom_nuevo = st.text_input("Nombre del Campo:", placeholder="Ej: Nivel Educativo, Ocupación...", key="nc_nom")
+        with col_nc2:
+            tipo_nuevo = st.selectbox("Tipo de Dato:", ["Texto", "Desplegable"], key="nc_tipo")
+        with col_nc3:
+            ops_nuevo = st.text_input("Opciones si es Desplegable (separadas por comas):", placeholder="Opción 1, Opción 2, Opción 3", key="nc_ops")
             
-            if btn_crear_campo:
-                if nom_nuevo.strip():
-                    lista_ops = [x.strip() for x in ops_nuevo.split(",") if x.strip()]
-                    agregar_campo_personalizado(nom_nuevo.strip(), tipo_nuevo, lista_ops)
-                    st.success(f"✅ Campo '{nom_nuevo.strip()}' creado con éxito.")
-                    st.rerun()
-                else:
-                    st.error("Ingrese el nombre del nuevo campo.")
+        btn_crear_campo = st.button("➕ Añadir Campo", type="primary", use_container_width=True)
+        
+        if btn_crear_campo:
+            if nom_nuevo.strip():
+                lista_ops = [x.strip() for x in ops_nuevo.split(",") if x.strip()]
+                agregar_campo_personalizado(nom_nuevo.strip(), tipo_nuevo, lista_ops)
+                st.success(f"✅ Campo '{nom_nuevo.strip()}' creado con éxito.")
+                st.rerun()
+            else:
+                st.error("Ingrese el nombre del nuevo campo.")
 
         st.markdown("---")
 
@@ -1093,72 +1089,70 @@ if "✏️ Personalizar Formulario" in pestañas:
                 c_ops = ", ".join(c_cust["opciones"]) if c_cust["opciones"] else ""
                 
                 with st.expander(f"⚙️ Campo: **{c_nom}** (`Tipo: {c_tipo}`)"):
-                    with st.form(key=f"form_edit_cust_{c_id}"):
-                        col_ec1, col_ec2, col_ec3 = st.columns([2, 1.5, 3])
-                        with col_ec1:
-                            e_nom_cust = st.text_input("Renombrar Campo:", value=c_nom, key=f"e_nom_{c_id}")
-                        with col_ec2:
-                            e_tipo_cust = st.selectbox("Cambiar Tipo de Dato:", ["Texto", "Desplegable"], index=0 if c_tipo=="Texto" else 1, key=f"e_tipo_{c_id}")
-                        with col_ec3:
-                            e_ops_cust = st.text_input("Opciones (separadas por comas):", value=c_ops, key=f"e_ops_{c_id}")
+                    col_ec1, col_ec2, col_ec3 = st.columns([2, 1.5, 3])
+                    with col_ec1:
+                        e_nom_cust = st.text_input("Renombrar Campo:", value=c_nom, key=f"e_nom_{c_id}")
+                    with col_ec2:
+                        e_tipo_cust = st.selectbox("Cambiar Tipo de Dato:", ["Texto", "Desplegable"], index=0 if c_tipo=="Texto" else 1, key=f"e_tipo_{c_id}")
+                    with col_ec3:
+                        e_ops_cust = st.text_input("Opciones (separadas por comas):", value=c_ops, key=f"e_ops_{c_id}")
 
-                        col_btn1, col_btn2 = st.columns(2)
-                        with col_btn1:
-                            btn_upd = st.form_submit_button("💾 Actualizar Campo", type="primary", use_container_width=True)
-                        with col_btn2:
-                            btn_del = st.form_submit_button("🗑️ Eliminar Campo", use_container_width=True)
+                    col_btn1, col_btn2 = st.columns(2)
+                    with col_btn1:
+                        btn_upd = st.button("💾 Actualizar Campo", key=f"btn_upd_cust_{c_id}", type="primary", use_container_width=True)
+                    with col_btn2:
+                        btn_del = st.button("🗑️ Eliminar Campo", key=f"btn_del_cust_{c_id}", use_container_width=True)
 
-                        if btn_upd:
-                            lista_ops_updated = [x.strip() for x in e_ops_cust.split(",") if x.strip()]
-                            actualizar_campo_personalizado(c_id, e_nom_cust.strip(), e_tipo_cust, lista_ops_updated)
-                            st.success(f"✅ Campo '{c_nom}' actualizado a '{e_nom_cust.strip()}'. Estructura guardada actualizada.")
-                            st.rerun()
+                    if btn_upd:
+                        lista_ops_updated = [x.strip() for x in e_ops_cust.split(",") if x.strip()]
+                        actualizar_campo_personalizado(c_id, e_nom_cust.strip(), e_tipo_cust, lista_ops_updated)
+                        st.success(f"✅ Campo '{c_nom}' actualizado a '{e_nom_cust.strip()}'. Estructura guardada actualizada.")
+                        st.rerun()
 
-                        if btn_del:
-                            eliminar_campo_personalizado(c_id)
-                            st.warning(f"Campo '{c_nom}' eliminado y limpiado de la base de datos.")
-                            st.rerun()
+                    if btn_del:
+                        eliminar_campo_personalizado(c_id)
+                        st.warning(f"Campo '{c_nom}' eliminado y limpiado de la base de datos.")
+                        st.rerun()
         else:
             st.info("No hay campos personalizados adicionales creados.")
 
         st.markdown("---")
 
         st.markdown("### ⚙️ Configurar Etiquetas de Campos Base Predeterminados")
-        with st.form("form_config_campos_avanzado"):
-            for clave, (etiqueta_def, tipo_def, opciones_def) in CAMPOS_BASE_DEFAULT.items():
-                st.markdown(f"##### Campo Base: `{clave}`")
-                c_data = cfg_campos.get(clave, {"etiqueta": etiqueta_def, "tipo_control": tipo_def, "opciones": json.loads(opciones_def)})
-                
-                col_c1, col_c2, col_c3 = st.columns([2, 1.5, 3])
-                with col_c1:
-                    st.text_input(f"Etiqueta visible ({clave}):", value=c_data["etiqueta"], key=f"cfg_lbl_{clave}")
-                with col_c2:
-                    st.selectbox(
-                        "Tipo de control:",
-                        ["texto", "desplegable"],
-                        index=0 if c_data["tipo_control"] == "texto" else 1,
-                        key=f"cfg_tipo_{clave}"
-                    )
-                with col_c3:
-                    str_opciones_actuales = ", ".join(c_data["opciones"])
-                    st.text_input(
-                        "Opciones (separadas por comas):",
-                        value=str_opciones_actuales,
-                        key=f"cfg_ops_{clave}"
-                    )
-                st.markdown("---")
+        for clave, (etiqueta_def, tipo_def, opciones_def) in CAMPOS_BASE_DEFAULT.items():
+            st.markdown(f"##### Campo Base: `{clave}`")
+            c_data = cfg_campos.get(clave, {"etiqueta": etiqueta_def, "tipo_control": tipo_def, "opciones": json.loads(opciones_def)})
+            
+            col_c1, col_c2, col_c3 = st.columns([2, 1.5, 3])
+            with col_c1:
+                st.text_input(f"Etiqueta visible ({clave}):", value=c_data["etiqueta"], key=f"cfg_lbl_{clave}")
+            with col_c2:
+                st.selectbox(
+                    "Tipo de control:",
+                    ["texto", "desplegable"],
+                    index=0 if c_data["tipo_control"] == "texto" else 1,
+                    key=f"cfg_tipo_{clave}"
+                )
+            with col_c3:
+                str_opciones_actuales = ", ".join(c_data["opciones"])
+                st.text_input(
+                    "Opciones (separadas por comas):",
+                    value=str_opciones_actuales,
+                    key=f"cfg_ops_{clave}"
+                )
+            st.markdown("---")
 
-            if st.form_submit_button("💾 Guardar Etiquetas de Campos Base", type="primary", use_container_width=True):
-                for clave in CAMPOS_BASE_DEFAULT.keys():
-                    etiq_val = st.session_state[f"cfg_lbl_{clave}"].strip()
-                    tipo_ctrl_val = st.session_state[f"cfg_tipo_{clave}"]
-                    ops_raw = st.session_state[f"cfg_ops_{clave}"]
-                    
-                    lista_ops = [x.strip() for x in ops_raw.split(",") if x.strip()]
-                    guardar_configuracion_campo(clave, etiq_val, tipo_ctrl_val, lista_ops)
+        if st.button("💾 Guardar Etiquetas de Campos Base", type="primary", use_container_width=True):
+            for clave in CAMPOS_BASE_DEFAULT.keys():
+                etiq_val = st.session_state[f"cfg_lbl_{clave}"].strip()
+                tipo_ctrl_val = st.session_state[f"cfg_tipo_{clave}"]
+                ops_raw = st.session_state[f"cfg_ops_{clave}"]
                 
-                st.success("✅ Configuración guardada correctamente.")
-                st.rerun()
+                lista_ops = [x.strip() for x in ops_raw.split(",") if x.strip()]
+                guardar_configuracion_campo(clave, etiq_val, tipo_ctrl_val, lista_ops)
+            
+            st.success("✅ Configuración guardada correctamente.")
+            st.rerun()
 
 # -----------------------------------------------------------------------------
 # TAB: GESTIÓN DE USUARIOS
@@ -1186,26 +1180,25 @@ if st.session_state.rol_actual == "Master" and "👥 Usuarios y Permisos" in pes
             else:
                 val_username, val_nombre, val_rol, perm_actuales = "", "", "Administrador", {}
 
-            with st.form("form_gestion_usuario"):
-                u_username = st.text_input("Username:", value=val_username, disabled=(user_sel != "-- Crear Nuevo --"))
-                u_pass = st.text_input("Contraseña (dejar en blanco para mantener actual):", type="password")
-                u_nombre = st.text_input("Nombre Completo:", value=val_nombre)
-                u_rol = st.selectbox("Rol Asignado:", ["Administrador", "Visualizador"], index=0 if val_rol == "Administrador" else 1)
-                
-                st.markdown("#### 🔑 Permisos:")
-                nuevos_permisos = {}
-                for perm in LISTA_PERMISOS:
-                    val_check = perm_actuales.get(perm, False)
-                    nuevos_permisos[perm] = st.checkbox(f"Permitir: `{perm}`", value=val_check)
-                
-                if st.form_submit_button("💾 Guardar Usuario y Permisos", type="primary", use_container_width=True):
-                    target_user = u_username.strip() if user_sel == "-- Crear Nuevo --" else user_sel
-                    if target_user:
-                        guardar_usuario(target_user, u_pass, u_nombre.strip(), u_rol, nuevos_permisos)
-                        st.success(f"✅ Usuario {target_user} guardado.")
-                        st.rerun()
-                    else:
-                        st.error("Ingrese un usuario válido.")
+            u_username = st.text_input("Username:", value=val_username, disabled=(user_sel != "-- Crear Nuevo --"), key="usr_input_name")
+            u_pass = st.text_input("Contraseña (dejar en blanco para mantener actual):", type="password", key="usr_input_pass")
+            u_nombre = st.text_input("Nombre Completo:", value=val_nombre, key="usr_input_fullname")
+            u_rol = st.selectbox("Rol Asignado:", ["Administrador", "Visualizador"], index=0 if val_rol == "Administrador" else 1, key="usr_input_rol")
+            
+            st.markdown("#### 🔑 Permisos:")
+            nuevos_permisos = {}
+            for perm in LISTA_PERMISOS:
+                val_check = perm_actuales.get(perm, False)
+                nuevos_permisos[perm] = st.checkbox(f"Permitir: `{perm}`", value=val_check, key=f"perm_chk_{perm}")
+            
+            if st.button("💾 Guardar Usuario y Permisos", type="primary", use_container_width=True):
+                target_user = u_username.strip() if user_sel == "-- Crear Nuevo --" else user_sel
+                if target_user:
+                    guardar_usuario(target_user, u_pass, u_nombre.strip(), u_rol, nuevos_permisos)
+                    st.success(f"✅ Usuario {target_user} guardado.")
+                    st.rerun()
+                else:
+                    st.error("Ingrese un usuario válido.")
 
         with col_u2:
             st.markdown("### 📋 Usuarios Registrados")
