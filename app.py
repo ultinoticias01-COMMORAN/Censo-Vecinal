@@ -112,7 +112,6 @@ def init_db():
         )
     """)
     
-    # Creación garantizada de la tabla de campos personalizados
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS configuracion_campos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -219,10 +218,12 @@ def cargar_habitantes():
     df = pd.read_sql_query("SELECT * FROM habitantes", conn)
     conn.close()
     
-    df["sexo"] = df["sexo"].fillna("No especificado")
-    df["condicion_salud"] = df["condicion_salud"].fillna("Ninguna")
-    df["detalle_salud"] = df["detalle_salud"].fillna("")
-    df["campos_adicionales"] = df["campos_adicionales"].fillna("{}")
+    if not df.empty:
+        df["cedula"] = df["cedula"].astype(str)
+        df["sexo"] = df["sexo"].fillna("No especificado")
+        df["condicion_salud"] = df["condicion_salud"].fillna("Ninguna")
+        df["detalle_salud"] = df["detalle_salud"].fillna("")
+        df["campos_adicionales"] = df["campos_adicionales"].fillna("{}")
     return df
 
 def guardar_habitante(datos):
@@ -240,7 +241,8 @@ def guardar_habitante(datos):
 def actualizar_habitante_completo(cedula_original, datos_nuevos):
     conn = get_connection()
     cursor = conn.cursor()
-    nueva_cedula = datos_nuevos[0]
+    nueva_cedula = str(datos_nuevos[0])
+    cedula_original = str(cedula_original)
     
     if cedula_original != nueva_cedula:
         cursor.execute("UPDATE bitacora_documentos SET cedula = ? WHERE cedula = ?", (nueva_cedula, cedula_original))
@@ -259,8 +261,8 @@ def actualizar_habitante_completo(cedula_original, datos_nuevos):
 def eliminar_habitante(cedula):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM habitantes WHERE cedula = ?", (cedula,))
-    cursor.execute("DELETE FROM bitacora_documentos WHERE cedula = ?", (cedula,))
+    cursor.execute("DELETE FROM habitantes WHERE cedula = ?", (str(cedula),))
+    cursor.execute("DELETE FROM bitacora_documentos WHERE cedula = ?", (str(cedula),))
     conn.commit()
     conn.close()
 
@@ -280,22 +282,20 @@ def registrar_documento_bitacora(cedula, tipo_doc, descripcion, emitido_por):
     cursor.execute("""
         INSERT INTO bitacora_documentos (cedula, tipo_documento, descripcion, fecha_emision, emitido_por)
         VALUES (?, ?, ?, ?, ?)
-    """, (cedula, tipo_doc, descripcion, fecha_actual, emitido_por))
+    """, (str(cedula), tipo_doc, descripcion, fecha_actual, emitido_por))
     conn.commit()
     conn.close()
 
 def obtener_bitacora_habitante(cedula):
     conn = get_connection()
-    df = pd.read_sql_query("SELECT id, tipo_documento, descripcion, fecha_emision, emitido_por FROM bitacora_documentos WHERE cedula = ? ORDER BY id DESC", conn, params=(cedula,))
+    df = pd.read_sql_query("SELECT id, tipo_documento, descripcion, fecha_emision, emitido_por FROM bitacora_documentos WHERE cedula = ? ORDER BY id DESC", conn, params=(str(cedula),))
     conn.close()
     return df
 
-# --- CAMPOS ADICIONALES DINÁMICOS Y PERSONALIZADOS CON AUTO-REPARACIÓN ---
+# --- CAMPOS ADICIONALES DINÁMICOS Y PERSONALIZADOS ---
 def cargar_campos_personalizados():
     conn = get_connection()
     cursor = conn.cursor()
-    
-    # Verificación defensiva antes de ejecutar la consulta
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS configuracion_campos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -439,7 +439,7 @@ if not st.session_state.autenticado:
 cfg_campos = cargar_configuracion_campos()
 
 # -----------------------------------------------------------------------------
-# 5. BARRA LATERAL (SECCIÓN VARIABLE EXTRA ELIMINADA)
+# 5. BARRA LATERAL
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.title("👤 Perfil de Usuario")
@@ -534,7 +534,7 @@ if "📊 Consultar y Filtros" in pestañas:
 
             if vista_modo == "Tarjetas Visuales":
                 for idx, hab in df_filtrado.iterrows():
-                    cedula_curr = hab["cedula"]
+                    cedula_curr = str(hab["cedula"])
                     nombre_completo = f"{hab['nombres']} {hab['apellidos']}"
                     
                     with st.expander(f"👤 **{nombre_completo}** — Cédula: `{cedula_curr}` | Manzana: {hab['manzana']}", expanded=bool(busqueda.strip())):
@@ -583,6 +583,8 @@ if "📊 Consultar y Filtros" in pestañas:
                             with btn_col2:
                                 if st.button(f"🗑️ Eliminar Registro", key=f"btn_del_{cedula_curr}", type="primary", use_container_width=True):
                                     eliminar_habitante(cedula_curr)
+                                    if f"modo_edit_{cedula_curr}" in st.session_state:
+                                        del st.session_state[f"modo_edit_{cedula_curr}"]
                                     st.success(f"Habitante con cédula {cedula_curr} eliminado.")
                                     st.rerun()
 
@@ -593,10 +595,10 @@ if "📊 Consultar y Filtros" in pestañas:
                             with st.form(key=f"form_insitu_edit_{cedula_curr}"):
                                 col_ins1, col_ins2 = st.columns(2)
                                 with col_ins1:
-                                    e_ced = st.text_input("Cédula:", value=hab['cedula'])
-                                    e_nom = st.text_input("Nombres:", value=hab['nombres'])
-                                    e_ape = st.text_input("Apellidos:", value=hab['apellidos'])
-                                    e_tel = st.text_input("Teléfono:", value=hab['telefono'])
+                                    e_ced = st.text_input("Cédula:", value=str(hab['cedula']))
+                                    e_nom = st.text_input("Nombres:", value=str(hab['nombres']))
+                                    e_ape = st.text_input("Apellidos:", value=str(hab['apellidos']))
+                                    e_tel = st.text_input("Teléfono:", value=str(hab['telefono']))
                                 with col_ins2:
                                     e_sex = st.selectbox("Sexo:", ["Femenino", "Masculino", "Otro"], index=0 if hab['sexo']=="Femenino" else (1 if hab['sexo']=="Masculino" else 2))
                                     e_fn = st.date_input(
@@ -614,17 +616,17 @@ if "📊 Consultar y Filtros" in pestañas:
                                         format="DD/MM/YYYY"
                                     )
                                 
-                                e_man = st.text_input("Manzana:", value=hab['manzana'])
-                                e_dir = st.text_area("Dirección:", value=hab['direccion'])
-                                e_sal = st.text_input("Condición Salud:", value=hab['condicion_salud'])
-                                e_detsal = st.text_input("Detalle Salud:", value=hab['detalle_salud'])
+                                e_man = st.text_input("Manzana:", value=str(hab['manzana']))
+                                e_dir = st.text_area("Dirección:", value=str(hab['direccion']))
+                                e_sal = st.text_input("Condición Salud:", value=str(hab['condicion_salud']))
+                                e_detsal = st.text_input("Detalle Salud:", value=str(hab['detalle_salud']))
                                 
                                 if st.form_submit_button("💾 Guardar Cambios", type="primary", use_container_width=True):
                                     datos_actualizados = (
                                         e_ced.strip(), e_nom.strip(), e_ape.strip(), e_sex,
                                         e_fn.strftime("%Y-%m-%d"), e_fl.strftime("%Y-%m-%d"),
                                         e_dir.strip(), e_man.strip(), e_tel.strip(),
-                                        e_sal.strip(), e_detsal.strip(), hab['campos_adicionales']
+                                        e_sal.strip(), e_detsal.strip(), str(hab['campos_adicionales'])
                                     )
                                     actualizar_habitante_completo(cedula_curr, datos_actualizados)
                                     st.session_state[f"modo_edit_{cedula_curr}"] = False
@@ -748,7 +750,6 @@ if "📝 Registrar Habitante" in pestañas:
 
             st.markdown("---")
 
-            # SECCIÓN DE CAMPOS CREADOS POR EL USUARIO
             campos_config = cargar_campos_personalizados()
             if campos_config:
                 st.markdown("### ➕ Campos Personalizados Agregados")
@@ -878,7 +879,6 @@ if "✏️ Personalizar Formulario" in pestañas:
     with tabs[pestañas.index("✏️ Personalizar Formulario")]:
         st.subheader("✏️ Personalizar Formulario de Registro")
         
-        # --- SECCIÓN 1: CREAR NUEVOS CAMPOS ---
         st.markdown("### ➕ Crear Nuevo Campo Personalizado")
         with st.form("form_crear_nuevo_campo"):
             col_nc1, col_nc2, col_nc3 = st.columns([2, 1.5, 3])
@@ -900,7 +900,6 @@ if "✏️ Personalizar Formulario" in pestañas:
                 else:
                     st.error("Ingrese el nombre del nuevo campo.")
 
-        # --- GESTIONAR CAMPOS CREADOS ---
         lista_campos_cust = cargar_campos_personalizados()
         if lista_campos_cust:
             st.markdown("#### 📋 Campos Personalizados Creados")
@@ -922,7 +921,6 @@ if "✏️ Personalizar Formulario" in pestañas:
 
         st.markdown("---")
 
-        # --- SECCIÓN 2: CONFIGURAR CAMPOS BASE ---
         st.markdown("### ⚙️ Configurar Campos Base Predeterminados")
         with st.form("form_config_campos_avanzado"):
             for clave, (etiqueta_def, tipo_def, opciones_def) in CAMPOS_BASE_DEFAULT.items():
