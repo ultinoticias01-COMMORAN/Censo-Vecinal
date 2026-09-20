@@ -431,7 +431,7 @@ with st.sidebar:
                 st.success("Variable creada con éxito.")
                 st.rerun()
 
-    st.caption("Sistema de Censo Comunitario v5.3")
+    st.caption("Sistema de Censo Comunitario v5.4")
 
 # -----------------------------------------------------------------------------
 # 6. NAVEGACIÓN Y PESTAÑAS DINÁMICAS
@@ -463,30 +463,56 @@ if not pestañas:
 tabs = st.tabs(pestañas)
 
 # -----------------------------------------------------------------------------
-# TAB: CONSULTAR Y FILTROS (DISEÑO VISUAL REDISEÑADO)
+# TAB: CONSULTAR Y FILTROS (BÚSQUEDA EN TODOS LOS CAMPOS Y DESCARGA)
 # -----------------------------------------------------------------------------
 if "📊 Consultar y Filtros" in pestañas:
     with tabs[pestañas.index("📊 Consultar y Filtros")]:
-        st.subheader("📊 Consulta e Información Detallada de Habitantes")
+        st.subheader("📊 Búsqueda Global e Información Detallada de Habitantes")
         df = cargar_habitantes()
         
         if not df.empty:
             df["edad_num"] = df["fecha_nac"].apply(calcular_edad)
             df["tiempo_comunidad_num"] = df["fecha_llegada"].apply(calcular_tiempo_comunidad)
             
-            # Buscador principal
+            # Buscador global
             col_search1, col_search2 = st.columns([3, 1])
             with col_search1:
-                busqueda = st.text_input("🔍 Buscar por Cédula, Nombre, Apellido o Manzana:", placeholder="Escriba para buscar...")
+                busqueda = st.text_input("🔍 Buscar en TODOS los campos (Cédula, Nombres, Dirección, Salud, Teléfono, etc.):", placeholder="Escriba cualquier dato para buscar...")
             with col_search2:
                 vista_modo = st.radio("Modo de vista:", ["Tarjetas Visuales", "Tabla Resumida"], horizontal=True)
 
+            # Filtro omnicanal (busca coincidencia en cualquier columna convertida a texto)
             if busqueda.strip():
-                df_filtrado = df[df.astype(str).apply(lambda x: x.str.contains(busqueda, case=False)).any(axis=1)]
+                df_filtrado = df[df.apply(lambda row: row.astype(str).str.contains(busqueda, case=False).any(), axis=1)]
             else:
                 df_filtrado = df.copy()
 
-            st.caption(f"Mostrando {len(df_filtrado)} habitantes encontrados.")
+            st.caption(f"Showing/Mostrando {len(df_filtrado)} registro(s) encontrado(s).")
+
+            # --- OPCIÓN DE DESCARGA DE ENCONTRADOS ---
+            if not df_filtrado.empty:
+                col_dl1, col_dl2, _ = st.columns([1, 1, 2])
+                with col_dl1:
+                    csv_data = df_filtrado.to_csv(index=False, sep=";", encoding="utf-8-sig")
+                    st.download_button(
+                        label="📥 Descargar Encontrados (CSV)",
+                        data=csv_data,
+                        file_name=f"censo_busqueda_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                with col_dl2:
+                    buffer_excel = io.BytesIO()
+                    with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
+                        df_filtrado.to_excel(writer, index=False, sheet_name="Resultados")
+                    st.download_button(
+                        label="📊 Descargar Encontrados (Excel)",
+                        data=buffer_excel.getvalue(),
+                        file_name=f"censo_busqueda_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+                st.markdown("---")
 
             if vista_modo == "Tarjetas Visuales":
                 for idx, hab in df_filtrado.iterrows():
@@ -519,7 +545,6 @@ if "📊 Consultar y Filtros" in pestañas:
                             if hab['detalle_salud']:
                                 st.write(f"**Detalle Salud:** {hab['detalle_salud']}")
                             
-                            # Mostrar Variables Adicionales
                             try:
                                 extras = json.loads(hab['campos_adicionales'])
                                 if extras:
@@ -546,7 +571,7 @@ if "📊 Consultar y Filtros" in pestañas:
                                     st.success(f"Habitante con cédula {cedula_curr} eliminado.")
                                     st.rerun()
 
-                        # Formulario In-Situ para Editar Datos si se presiona "✏️ Editar Datos"
+                        # Formulario In-Situ para Editar Datos
                         if st.session_state.get(f"modo_edit_{cedula_curr}", False):
                             st.markdown("---")
                             st.subheader(f"🛠️ Editar Datos de {nombre_completo}")
@@ -828,56 +853,94 @@ if "⚙️ Editar / Eliminar" in pestañas:
                     st.rerun()
 
 # -----------------------------------------------------------------------------
-# TAB: ESTADÍSTICAS
+# TAB: ESTADÍSTICAS (FILTROS ESPECÍFICOS DE EDAD Y SEXO)
 # -----------------------------------------------------------------------------
 if "📈 Estadísticas" in pestañas:
     with tabs[pestañas.index("📈 Estadísticas")]:
-        st.subheader("📈 Resumen Estadístico e Indicadores de la Comunidad")
+        st.subheader("📈 Resumen Estadístico e Indicadores Demográficos")
         df_stat = cargar_habitantes()
         
         if not df_stat.empty:
             df_stat["edad"] = df_stat["fecha_nac"].apply(calcular_edad)
             
-            def clasificar_edad(edad):
-                if edad < 12: return "Niños (0-11)"
-                elif edad < 18: return "Adolescentes (12-17)"
-                elif edad < 60: return "Adultos (18-59)"
-                else: return "Adultos Mayores (60+)"
+            # Clasificación personalizada de grupos según lo solicitado
+            def clasificar_rango_edad(edad):
+                if edad <= 12: return "0 a 12 años"
+                elif 13 <= edad <= 15: return "13 a 15 años"
+                elif 16 <= edad <= 17: return "16 a 17 años"
+                elif 18 <= edad < 60: return "18 a 59 años"
+                else: return "60+ años"
             
-            df_stat["grupo_edad"] = df_stat["edad"].apply(clasificar_edad)
+            df_stat["rango_etario"] = df_stat["edad"].apply(clasificar_rango_edad)
             
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Total Habitantes", len(df_stat))
-            m2.metric("Adultos Mayores (60+)", len(df_stat[df_stat["edad"] >= 60]))
-            m3.metric("Menores de Edad (<18)", len(df_stat[df_stat["edad"] < 18]))
-            m4.metric("Con Afectación de Salud", len(df_stat[df_stat["condicion_salud"] != "Ninguna"]))
+            # Filtro por Sexo opcional para análisis dinámico
+            st.markdown("##### 🔍 Filtrar Estadísticas por Sexo")
+            opciones_sexo = ["Todos"] + list(df_stat["sexo"].unique())
+            sexo_filtro = st.selectbox("Seleccione para filtrar las métricas:", opciones_sexo)
             
+            if sexo_filtro != "Todos":
+                df_stat_calc = df_stat[df_stat["sexo"] == sexo_filtro]
+            else:
+                df_stat_calc = df_stat.copy()
+
             st.markdown("---")
+            
+            # Métricas específicas solicitadas
+            kpi_e1, kpi_e2, kpi_e3, kpi_e4, kpi_e5 = st.columns(5)
+            kpi_e1.metric("Población Seleccionada", len(df_stat_calc))
+            kpi_e2.metric("Niños (0 a 12 años)", len(df_stat_calc[df_stat_calc["edad"] <= 12]))
+            kpi_e3.metric("Mayores de 15 años", len(df_stat_calc[df_stat_calc["edad"] > 15]))
+            kpi_e4.metric("Mayores de 18 años", len(df_stat_calc[df_stat_calc["edad"] >= 18]))
+            kpi_e5.metric("Mayores de 60 años", len(df_stat_calc[df_stat_calc["edad"] >= 60]))
+
+            st.markdown("---")
+            
             col_g1, col_g2 = st.columns(2)
             
             with col_g1:
-                st.markdown("##### 👥 Distribución por Sexo / Género")
+                st.markdown("##### 📊 Rangos de Edad Distribuidos por Sexo")
+                df_edad_sexo = df_stat.groupby(["rango_etario", "sexo"]).size().reset_index(name="Cantidad")
+                fig_edad_sexo = px.bar(
+                    df_edad_sexo, 
+                    x="rango_etario", 
+                    y="Cantidad", 
+                    color="sexo", 
+                    barmode="group",
+                    title="Comparativa de Edades por Sexo",
+                    color_discrete_sequence=px.colors.qualitative.Set2
+                )
+                st.plotly_chart(fig_edad_sexo, use_container_width=True)
+
+                st.markdown("##### 👥 Distribución Total por Sexo / Género")
                 fig_sexo = px.pie(df_stat, names="sexo", hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
                 st.plotly_chart(fig_sexo, use_container_width=True)
-                
-                st.markdown("##### 🏘️ Habitantes por Manzana / Sector")
-                df_manzana = df_stat["manzana"].value_counts().reset_index()
-                df_manzana.columns = ["Manzana", "Cantidad"]
-                fig_manz = px.bar(df_manzana, x="Manzana", y="Cantidad", color="Cantidad", color_continuous_scale="Blues")
-                st.plotly_chart(fig_manz, use_container_width=True)
 
             with col_g2:
-                st.markdown("##### 🎂 Grupos Etarios")
-                df_grupo = df_stat["grupo_edad"].value_counts().reset_index()
-                df_grupo.columns = ["Grupo Etario", "Habitantes"]
-                fig_edad = px.bar(df_grupo, x="Grupo Etario", y="Habitantes", color="Grupo Etario", color_discrete_sequence=px.colors.qualitative.Set2)
-                st.plotly_chart(fig_edad, use_container_width=True)
-                
-                st.markdown("##### ⚕️ Condición de Salud / Vulnerabilidad")
-                df_salud = df_stat["condicion_salud"].value_counts().reset_index()
-                df_salud.columns = ["Condición", "Casos"]
-                fig_salud = px.pie(df_salud, values="Casos", names="Condición", color_discrete_sequence=px.colors.qualitative.Safe)
-                st.plotly_chart(fig_salud, use_container_width=True)
+                st.markdown("##### 🏘️ Habitantes por Manzana y Sexo")
+                df_manzana_sexo = df_stat.groupby(["manzana", "sexo"]).size().reset_index(name="Habitantes")
+                fig_manz_sexo = px.bar(
+                    df_manzana_sexo, 
+                    x="manzana", 
+                    y="Habitantes", 
+                    color="sexo", 
+                    title="Habitantes por Manzana desglosados por Sexo",
+                    color_discrete_sequence=px.colors.qualitative.Safe
+                )
+                st.plotly_chart(fig_manz_sexo, use_container_width=True)
+
+                st.markdown("##### ⚕️ Condición de Salud por Sexo")
+                df_salud_sexo = df_stat[df_stat["condicion_salud"] != "Ninguna"].groupby(["condicion_salud", "sexo"]).size().reset_index(name="Casos")
+                if not df_salud_sexo.empty:
+                    fig_salud_sex = px.bar(
+                        df_salud_sexo, 
+                        x="condicion_salud", 
+                        y="Casos", 
+                        color="sexo", 
+                        title="Afectaciones de Salud por Sexo"
+                    )
+                    st.plotly_chart(fig_salud_sex, use_container_width=True)
+                else:
+                    st.info("No hay condiciones de salud especiales registradas.")
         else:
             st.info("📊 No hay datos suficientes para generar estadísticas.")
 
@@ -993,16 +1056,16 @@ if "💾 Respaldos y Borrado" in pestañas:
         col_res1, col_res2 = st.columns(2)
         
         with col_res1:
-            st.markdown("### 📤 Exportar Datos")
+            st.markdown("### 📤 Exportar Datos General")
             df_exp = cargar_habitantes()
             if not df_exp.empty:
                 csv_bytes = df_exp.to_csv(index=False, sep=";", encoding="utf-8-sig")
-                st.download_button("📥 Descargar Censo (CSV)", csv_bytes, "censo_comunidad.csv", "text/csv")
+                st.download_button("📥 Descargar Censo Completo (CSV)", csv_bytes, "censo_comunidad_completo.csv", "text/csv")
                 
                 buffer_exc = io.BytesIO()
                 with pd.ExcelWriter(buffer_exc, engine='openpyxl') as writer:
                     df_exp.to_excel(writer, index=False, sheet_name="Censo")
-                st.download_button("📊 Descargar Censo (Excel)", buffer_exc.getvalue(), "censo_comunidad.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                st.download_button("📊 Descargar Censo Completo (Excel)", buffer_exc.getvalue(), "censo_comunidad_completo.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         with col_res2:
             st.markdown("### 📥 Importar Archivos (CSV / Excel)")
