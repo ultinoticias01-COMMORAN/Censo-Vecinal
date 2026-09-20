@@ -157,11 +157,6 @@ def init_db():
             )
         """)
         
-        cursor.execute("PRAGMA table_info(configuracion_campos)")
-        cols_campos = [column[1] for column in cursor.fetchall()]
-        if "opciones_json" not in cols_campos:
-            cursor.execute("ALTER TABLE configuracion_campos ADD COLUMN opciones_json TEXT DEFAULT '[]'")
-        
         conn.commit()
 
 init_db()
@@ -250,7 +245,7 @@ def cargar_habitantes():
     df["condicion_salud"] = df["condicion_salud"].fillna("Ninguna")
     df["detalle_salud"] = df["detalle_salud"].fillna("")
     df["es_jefe_hogar"] = df["es_jefe_hogar"].fillna(0).astype(int)
-    df["jefe_hogar_cedula"] = df["jefe_hogar_cedula"].fillna("")
+    df["jefe_hogar_cedula"] = df["jefe_hogar_cedula"].fillna("").astype(str).str.strip()
     df["campos_adicionales"] = df["campos_adicionales"].fillna("{}")
     return df
 
@@ -306,7 +301,6 @@ def borrar_todo_el_censo():
         cursor.execute("DELETE FROM bitacora_documentos")
         conn.commit()
 
-# --- FUNCIONES DE BITÁCORA ---
 def registrar_documento_bitacora(cedula, tipo_doc, descripcion, emitido_por):
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -326,7 +320,6 @@ def obtener_bitacora_habitante(cedula):
         )
     return df
 
-# --- GESTIÓN DE CAMPOS PERSONALIZADOS ---
 def cargar_campos_personalizados():
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -402,7 +395,6 @@ def eliminar_campo_personalizado(id_campo):
         cursor.execute("DELETE FROM configuracion_campos WHERE id = ?", (id_campo,))
         conn.commit()
 
-# --- USUARIOS Y PERMISOS ---
 def verificar_login(username, password):
     pass_hashed = hash_password(password)
     with get_connection() as conn:
@@ -444,20 +436,20 @@ def tiene_permiso(clave_permiso):
     permisos = st.session_state.get("permisos_usuario", {})
     return permisos.get(clave_permiso, False)
 
-def renderizar_campo_dinamico(key_campo, cfg_dict, valor_previo="", key_suffix=""):
+def renderizar_campo_dinamico(key_campo, cfg_dict, key_suffix=""):
     cfg = cfg_dict.get(key_campo, {"etiqueta": key_campo, "tipo_control": "texto", "opciones": []})
     etiqueta = cfg["etiqueta"]
     tipo = cfg["tipo_control"]
     opciones = cfg["opciones"]
     key_widget = f"{key_campo}_{key_suffix}"
     
+    if key_widget not in st.session_state:
+        st.session_state[key_widget] = opciones[0] if (tipo == "desplegable" and opciones) else ""
+
     if tipo == "desplegable" and opciones:
-        index_sel = 0
-        if str(valor_previo) in opciones:
-            index_sel = opciones.index(str(valor_previo))
-        return st.selectbox(f"{etiqueta}:", opciones, index=index_sel, key=key_widget)
+        return st.selectbox(f"{etiqueta}:", opciones, key=key_widget)
     else:
-        return st.text_input(f"{etiqueta}:", value=str(valor_previo), key=key_widget)
+        return st.text_input(f"{etiqueta}:", key=key_widget)
 
 # -----------------------------------------------------------------------------
 # 4. CONTROL DE SESIÓN Y LOGIN
@@ -512,7 +504,7 @@ with st.sidebar:
         st.rerun()
         
     st.markdown("---")
-    st.caption("Sistema de Censo Comunitario v7.2")
+    st.caption("Sistema de Censo Comunitario v7.3")
 
 # -----------------------------------------------------------------------------
 # 6. NAVEGACIÓN Y PESTAÑAS DINÁMICAS
@@ -553,7 +545,6 @@ if "📊 Consultar y Filtros" in pestañas:
             df["edad_num"] = df["fecha_nac"].apply(calcular_edad)
             df["tiempo_comunidad_num"] = df["fecha_llegada"].apply(calcular_tiempo_comunidad)
             
-            # --- FILTROS DE BÚSQUEDA ---
             col_search1, col_search2, col_search3 = st.columns([2, 2, 1])
             with col_search1:
                 busqueda = st.text_input("🔍 Buscar por texto:", placeholder="Cédula, Nombres, Dirección, etc...")
@@ -570,7 +561,6 @@ if "📊 Consultar y Filtros" in pestañas:
             with col_search3:
                 vista_modo = st.radio("Modo de vista:", ["Tarjetas Visuales", "Tabla Resumida"], horizontal=True)
 
-            # Aplicación de Filtros
             df_filtrado = df.copy()
             if busqueda.strip():
                 df_filtrado = df_filtrado[df_filtrado.apply(lambda row: row.astype(str).str.contains(busqueda, case=False).any(), axis=1)]
@@ -727,7 +717,7 @@ if "📊 Consultar y Filtros" in pestañas:
                                 ops_jefes_edit = [("", "-- Seleccionar Jefe de Hogar --")] + [(j[0], f"{j[1]} {j[2]} ({j[0]})") for j in jefes_disp if j[0] != cedula_curr]
                                 idx_jefe = 0
                                 for i_j, o_j in enumerate(ops_jefes_edit):
-                                    if o_j[0] == hab['jefe_hogar_cedula']:
+                                    if str(o_j[0]).strip() == str(hab['jefe_hogar_cedula']).strip():
                                         idx_jefe = i_j
                                         break
                                 sel_jefe_edit = st.selectbox("Vincular a Jefe de Hogar:", [o[0] for o in ops_jefes_edit], index=idx_jefe, format_func=lambda c: dict(ops_jefes_edit).get(c, c), key=f"e_jefe_sel_{cedula_curr}")
@@ -740,11 +730,11 @@ if "📊 Consultar y Filtros" in pestañas:
                             
                             if st.button("💾 Guardar Cambios", key=f"btn_save_insitu_{cedula_curr}", type="primary", use_container_width=True):
                                 datos_actualizados = (
-                                    e_ced.strip(), e_nom.strip(), e_ape.strip(), e_sex,
+                                    str(e_ced).strip(), str(e_nom).strip(), str(e_ape).strip(), e_sex,
                                     e_fn.strftime("%Y-%m-%d"), e_fl.strftime("%Y-%m-%d"),
-                                    e_dir.strip(), e_man.strip(), e_tel.strip(),
-                                    e_sal.strip(), e_detsal.strip(),
-                                    1 if e_es_jefe else 0, e_jefe_ced,
+                                    str(e_dir).strip(), str(e_man).strip(), str(e_tel).strip(),
+                                    str(e_sal).strip(), str(e_detsal).strip(),
+                                    1 if e_es_jefe else 0, str(e_jefe_ced).strip(),
                                     hab['campos_adicionales']
                                 )
                                 actualizar_habitante_completo(cedula_curr, datos_actualizados)
@@ -760,8 +750,8 @@ if "📊 Consultar y Filtros" in pestañas:
                 df_tabla["fecha_nac"] = df_tabla["fecha_nac"].apply(formato_fecha_pantalla)
                 df_tabla["fecha_llegada"] = df_tabla["fecha_llegada"].apply(formato_fecha_pantalla)
                 
-                cols_mostrar = ["cedula", "nombres", "apellidos", "Rol Familiar", "sexo", "Edad", "manzana", "telefono", "condicion_salud"]
-                st.dataframe(df_tabla[cols_mostrar], use_container_width=True, hide_index=True)
+                cols_mostrar = ["cedula", "nombres", "apellidos", "Rol Familiar", "jefe_hogar_cedula", "sexo", "Edad", "manzana", "telefono", "condicion_salud"]
+                st.dataframe(df_tabla[cols_mostrar].rename(columns={"jefe_hogar_cedula": "C.I. Jefe Hogar"}), use_container_width=True, hide_index=True)
         else:
             st.info("No hay registros cargados en la base de datos.")
 
@@ -814,7 +804,7 @@ if "📜 Bitácora de Documentos" in pestañas:
             st.info("Registre habitantes para utilizar el módulo de bitácora.")
 
 # -----------------------------------------------------------------------------
-# TAB: REGISTRAR HABITANTE (FORMULARIO CON MANEJO DE ESTADO RESISTENTE)
+# TAB: REGISTRAR HABITANTE
 # -----------------------------------------------------------------------------
 if "📝 Registrar Habitante" in pestañas:
     with tabs[pestañas.index("📝 Registrar Habitante")]:
@@ -831,11 +821,14 @@ if "📝 Registrar Habitante" in pestañas:
         with col2:
             sexo = renderizar_campo_dinamico("sexo", cfg_campos, key_suffix="reg")
             lbl_fn = cfg_campos.get("fecha_nac", {}).get("etiqueta", "Fecha de Nacimiento")
+            
+            if "reg_fn_key" not in st.session_state:
+                st.session_state["reg_fn_key"] = datetime(1990, 1, 1).date()
+                
             fecha_nac = st.date_input(
                 f"{lbl_fn} (DD/MM/YYYY)", 
                 min_value=datetime(1900, 1, 1).date(), 
                 max_value=datetime.now().date(), 
-                value=datetime(1990, 1, 1).date(), 
                 format="DD/MM/YYYY",
                 key="reg_fn_key"
             )
@@ -846,14 +839,18 @@ if "📝 Registrar Habitante" in pestañas:
         st.markdown("### 👨‍👩‍👧‍👦 Núcleo Familiar")
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            es_jefe = st.checkbox("¿Es el Jefe de Hogar?", value=False, help="Marque si esta persona encabeza la familia", key="reg_es_jefe_key")
+            if "reg_es_jefe_key" not in st.session_state:
+                st.session_state["reg_es_jefe_key"] = False
+            es_jefe = st.checkbox("¿Es el Jefe de Hogar?", help="Marque si esta persona encabeza la familia", key="reg_es_jefe_key")
         
         jefe_seleccionado_cedula = ""
         with col_f2:
             if not es_jefe:
                 jefes_existentes = obtener_jefes_hogar()
                 if jefes_existentes:
-                    opciones_jefes = [("", "-- Seleccionar Jefe de Hogar --")] + [(j[0], f"{j[1]} {j[2]} ({j[0]})") for j in jefes_existentes]
+                    opciones_jefes = [("", "-- Seleccionar Jefe de Hogar --")] + [(str(j[0]).strip(), f"{j[1]} {j[2]} ({j[0]})") for j in jefes_existentes]
+                    if "reg_sel_jefe_key" not in st.session_state:
+                        st.session_state["reg_sel_jefe_key"] = ""
                     sel_jefe = st.selectbox(
                         "Seleccionar Jefe de Hogar vinculado:",
                         options=[op[0] for op in opciones_jefes],
@@ -872,11 +869,12 @@ if "📝 Registrar Habitante" in pestañas:
         with col3:
             manzana = renderizar_campo_dinamico("manzana", cfg_campos, key_suffix="reg")
             lbl_fl = cfg_campos.get("fecha_llegada", {}).get("etiqueta", "Fecha de Llegada")
+            if "reg_fl_key" not in st.session_state:
+                st.session_state["reg_fl_key"] = datetime(2010, 1, 1).date()
             fecha_llegada = st.date_input(
                 f"{lbl_fl} (DD/MM/YYYY)", 
                 min_value=datetime(1900, 1, 1).date(), 
                 max_value=datetime.now().date(), 
-                value=datetime(2010, 1, 1).date(), 
                 format="DD/MM/YYYY",
                 key="reg_fl_key"
             )
@@ -902,13 +900,17 @@ if "📝 Registrar Habitante" in pestañas:
                 nom_c = c_item["nombre"]
                 tipo_c = c_item["tipo"]
                 ops_c = c_item["opciones"]
+                key_cust = f"reg_cust_{c_item['id']}"
+                
+                if key_cust not in st.session_state:
+                    st.session_state[key_cust] = ops_c[0] if (tipo_c == "Desplegable" and ops_c) else ""
                 
                 target_col = col_c1 if idx % 2 == 0 else col_c2
                 with target_col:
                     if tipo_c == "Desplegable" and ops_c:
-                        datos_extra[nom_c] = st.selectbox(f"{nom_c}:", options=ops_c, key=f"reg_cust_{c_item['id']}")
+                        datos_extra[nom_c] = st.selectbox(f"{nom_c}:", options=ops_c, key=key_cust)
                     else:
-                        datos_extra[nom_c] = st.text_input(f"{nom_c}:", key=f"reg_cust_{c_item['id']}")
+                        datos_extra[nom_c] = st.text_input(f"{nom_c}:", key=key_cust)
 
         st.markdown("---")
         guardar = st.button("💾 Guardar Registro de Habitante", type="primary", use_container_width=True)
@@ -921,15 +923,27 @@ if "📝 Registrar Habitante" in pestañas:
                     fecha_nac.strftime("%Y-%m-%d"), fecha_llegada.strftime("%Y-%m-%d"),
                     str(direccion).strip(), str(manzana).strip(), str(telefono).strip(),
                     str(condicion_salud).strip(), str(detalle_salud).strip(),
-                    1 if es_jefe else 0, jefe_seleccionado_cedula, json_extra
+                    1 if es_jefe else 0, str(jefe_seleccionado_cedula).strip(), json_extra
                 )
                 guardar_habitante(datos)
                 
-                # --- VACIADO SEGURO DE CAMPOS (Evita conflictos en session_state) ---
-                for k in list(st.session_state.keys()):
-                    if k.endswith("_reg") or k.startswith("reg_"):
-                        del st.session_state[k]
-                
+                # REINICIO LIMPIO DE TODOS LOS CAMPOS
+                for key_campo in cfg_campos.keys():
+                    key_w = f"{key_campo}_reg"
+                    cfg = cfg_campos.get(key_campo, {})
+                    ops = cfg.get("opciones", [])
+                    st.session_state[key_w] = ops[0] if (cfg.get("tipo_control") == "desplegable" and ops) else ""
+
+                st.session_state["reg_fn_key"] = datetime(1990, 1, 1).date()
+                st.session_state["reg_fl_key"] = datetime(2010, 1, 1).date()
+                st.session_state["reg_es_jefe_key"] = False
+                if "reg_sel_jefe_key" in st.session_state:
+                    st.session_state["reg_sel_jefe_key"] = ""
+                    
+                for c_item in campos_config:
+                    key_c = f"reg_cust_{c_item['id']}"
+                    st.session_state[key_c] = c_item["opciones"][0] if (c_item["tipo"] == "Desplegable" and c_item["opciones"]) else ""
+
                 st.toast(f"✅ ¡Registro de {nombres} {apellidos} guardado con éxito! Formulario vaciado.", icon="🎉")
                 st.rerun()
             else:
@@ -1249,40 +1263,62 @@ if "💾 Respaldos y Borrado" in pestañas:
             if uploaded_file is not None and st.button("📥 Procesar e Importar"):
                 try:
                     if uploaded_file.name.endswith(".xlsx"):
-                        df_imp = pd.read_excel(uploaded_file)
+                        df_imp = pd.read_excel(uploaded_file, dtype=str)
                     else:
                         try:
-                            df_imp = pd.read_csv(uploaded_file, sep=";", encoding="utf-8-sig")
+                            df_imp = pd.read_csv(uploaded_file, sep=";", encoding="utf-8-sig", dtype=str)
                             if len(df_imp.columns) <= 1:
                                 uploaded_file.seek(0)
-                                df_imp = pd.read_csv(uploaded_file, sep=",")
+                                df_imp = pd.read_csv(uploaded_file, sep=",", dtype=str)
                         except Exception:
                             uploaded_file.seek(0)
-                            df_imp = pd.read_csv(uploaded_file, sep=",")
+                            df_imp = pd.read_csv(uploaded_file, sep=",", dtype=str)
 
-                    df_imp.columns = [str(col).strip().lower() for col in df_imp.columns]
+                    # Limpieza flexible de encabezados
+                    df_imp.columns = [str(col).strip().lower().replace(" ", "_") for col in df_imp.columns]
 
+                    def buscar_valor_columna(row, lista_posibles):
+                        for col in lista_posibles:
+                            if col in row and pd.notna(row[col]):
+                                return str(row[col]).strip()
+                        return ""
+
+                    registros_procesados = 0
                     for _, row in df_imp.iterrows():
-                        f_nac_imp = parsear_fecha_bd(row.get("fecha_nacimiento", row.get("fecha_nac", ""))).strftime("%Y-%m-%d")
-                        f_lleg_imp = parsear_fecha_bd(row.get("fecha_llegada", "")).strftime("%Y-%m-%d")
+                        ced_val = buscar_valor_columna(row, ["cedula", "ci", "cédula", "documento"])
+                        if not ced_val or ced_val.lower() == "nan":
+                            continue
+
+                        f_nac_imp = parsear_fecha_bd(buscar_valor_columna(row, ["fecha_nacimiento", "fecha_nac", "fecha_nacimiento_dd/mm/yyyy"])).strftime("%Y-%m-%d")
+                        f_lleg_imp = parsear_fecha_bd(buscar_valor_columna(row, ["fecha_llegada", "fecha_llegada_a_la_comunidad"])).strftime("%Y-%m-%d")
+                        
+                        jefe_ced_imp = buscar_valor_columna(row, [
+                            "jefe_hogar_cedula", "jefe_cedula", "cedula_jefe", 
+                            "c.i._jefe_hogar", "jefe_hogar", "jefe"
+                        ])
+                        
+                        es_jefe_raw = buscar_valor_columna(row, ["es_jefe_hogar", "es_jefe", "jefe_de_hogar"])
+                        es_jefe_val = 1 if es_jefe_raw.lower() in ["1", "true", "si", "sì", "sí"] else 0
 
                         guardar_habitante((
-                            str(row.get("cedula", "")).strip(),
-                            str(row.get("nombres", row.get("nombre", ""))).strip(),
-                            str(row.get("apellidos", row.get("apellido", ""))).strip(),
-                            str(row.get("sexo", "No especificado")).strip(),
+                            ced_val,
+                            buscar_valor_columna(row, ["nombres", "nombre"]),
+                            buscar_valor_columna(row, ["apellidos", "apellido"]),
+                            buscar_valor_columna(row, ["sexo", "genero", "género"]) or "No especificado",
                             f_nac_imp,
                             f_lleg_imp,
-                            str(row.get("direccion", "")).strip(),
-                            str(row.get("manzana", "")).strip(),
-                            str(row.get("telefono", "")).strip(),
-                            str(row.get("condicion_salud", "Ninguna")).strip(),
-                            str(row.get("detalle_salud", "")).strip(),
-                            int(row.get("es_jefe_hogar", 0)),
-                            str(row.get("jefe_hogar_cedula", "")).strip(),
-                            str(row.get("campos_adicionales", "{}")).strip()
+                            buscar_valor_columna(row, ["direccion", "dirección", "direccion_detallada"]),
+                            buscar_valor_columna(row, ["manzana", "sector"]),
+                            buscar_valor_columna(row, ["telefono", "teléfono", "celular"]),
+                            buscar_valor_columna(row, ["condicion_salud", "condición_salud", "salud"]) or "Ninguna",
+                            buscar_valor_columna(row, ["detalle_salud", "detalles_salud"]),
+                            es_jefe_val,
+                            jefe_ced_imp,
+                            buscar_valor_columna(row, ["campos_adicionales"]) or "{}"
                         ))
-                    st.success("✅ Importación completada.")
+                        registros_procesados += 1
+                        
+                    st.success(f"✅ Importación completada. Se procesaron {registros_procesados} registros correctamente.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error al importar archivo: {e}")
