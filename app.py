@@ -1030,7 +1030,7 @@ if "📈 Estadísticas" in pestañas:
             kpi_e1, kpi_e2, kpi_e3, kpi_e4, kpi_e5 = st.columns(5)
             kpi_e1.metric("Población Seleccionada", len(df_stat_calc))
             kpi_e2.metric("Niños (0 a 12 años)", len(df_stat_calc[df_stat_calc["edad"] <= 12]))
-            kpi_e3.metric("Mayores de 15 años", len(df_stat_calc[df_stat_calc["edad"] > 15]))
+            kpi_e3.metric("Mayores de 15 años o  mas", len(df_stat_calc[df_stat_calc["edad"] >= 15]))
             kpi_e4.metric("Mayores de 18 años", len(df_stat_calc[df_stat_calc["edad"] >= 18]))
             kpi_e5.metric("Mayores de 60 años", len(df_stat_calc[df_stat_calc["edad"] >= 60]))
 
