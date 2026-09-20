@@ -431,7 +431,7 @@ with st.sidebar:
                 st.success("Variable creada con éxito.")
                 st.rerun()
 
-    st.caption("Sistema de Censo Comunitario v5.4")
+    st.caption("Sistema de Censo Comunitario v5.5")
 
 # -----------------------------------------------------------------------------
 # 6. NAVEGACIÓN Y PESTAÑAS DINÁMICAS
@@ -443,8 +443,6 @@ if tiene_permiso("ver_censo"):
     pestañas.append("📊 Consultar y Filtros")
 if tiene_permiso("registrar_habitantes"):
     pestañas.append("📝 Registrar Habitante")
-if tiene_permiso("editar_habitantes") or tiene_permiso("eliminar_habitantes"):
-    pestañas.append("⚙️ Editar / Eliminar")
 if tiene_permiso("gestion_bitacora"):
     pestañas.append("📜 Bitácora de Documentos")
 if tiene_permiso("ver_estadisticas"):
@@ -487,7 +485,7 @@ if "📊 Consultar y Filtros" in pestañas:
             else:
                 df_filtrado = df.copy()
 
-            st.caption(f"Showing/Mostrando {len(df_filtrado)} registro(s) encontrado(s).")
+            st.caption(f"Mostrando {len(df_filtrado)} registro(s) encontrado(s).")
 
             # --- OPCIÓN DE DESCARGA DE ENCONTRADOS ---
             if not df_filtrado.empty:
@@ -585,8 +583,21 @@ if "📊 Consultar y Filtros" in pestañas:
                                     e_tel = st.text_input("Teléfono:", value=hab['telefono'])
                                 with col_ins2:
                                     e_sex = st.selectbox("Sexo:", ["Femenino", "Masculino", "Otro"], index=0 if hab['sexo']=="Femenino" else (1 if hab['sexo']=="Masculino" else 2))
-                                    e_fn = st.date_input("Fecha Nacimiento:", value=parsear_fecha_bd(hab['fecha_nac']), min_value=datetime(1900, 1, 1), format="DD/MM/YYYY")
-                                    e_fl = st.date_input("Fecha Llegada:", value=parsear_fecha_bd(hab['fecha_llegada']), min_value=datetime(1900, 1, 1), format="DD/MM/YYYY")
+                                    # LÍMITE DESDE 1900 APLICADO AQUÍ
+                                    e_fn = st.date_input(
+                                        "Fecha Nacimiento:", 
+                                        value=parsear_fecha_bd(hab['fecha_nac']), 
+                                        min_value=datetime(1900, 1, 1).date(), 
+                                        max_value=datetime.now().date(), 
+                                        format="DD/MM/YYYY"
+                                    )
+                                    e_fl = st.date_input(
+                                        "Fecha Llegada:", 
+                                        value=parsear_fecha_bd(hab['fecha_llegada']), 
+                                        min_value=datetime(1900, 1, 1).date(), 
+                                        max_value=datetime.now().date(), 
+                                        format="DD/MM/YYYY"
+                                    )
                                 
                                 e_man = st.text_input("Manzana:", value=hab['manzana'])
                                 e_dir = st.text_area("Dirección:", value=hab['direccion'])
@@ -686,7 +697,14 @@ if "📝 Registrar Habitante" in pestañas:
             with col2:
                 sexo = renderizar_campo_dinamico("sexo", cfg_campos, key_suffix="reg")
                 lbl_fn = cfg_campos.get("fecha_nac", {}).get("etiqueta", "Fecha de Nacimiento")
-                fecha_nac = st.date_input(f"{lbl_fn} (DD/MM/YYYY)", min_value=datetime(1900, 1, 1), max_value=datetime.now(), value=datetime(1990, 1, 1), format="DD/MM/YYYY")
+                # LÍMITE DESDE 1900 APLICADO AQUÍ
+                fecha_nac = st.date_input(
+                    f"{lbl_fn} (DD/MM/YYYY)", 
+                    min_value=datetime(1900, 1, 1).date(), 
+                    max_value=datetime.now().date(), 
+                    value=datetime(1990, 1, 1).date(), 
+                    format="DD/MM/YYYY"
+                )
                 telefono = renderizar_campo_dinamico("telefono", cfg_campos, key_suffix="reg")
 
             st.markdown("---")
@@ -696,7 +714,13 @@ if "📝 Registrar Habitante" in pestañas:
             with col3:
                 manzana = renderizar_campo_dinamico("manzana", cfg_campos, key_suffix="reg")
                 lbl_fl = cfg_campos.get("fecha_llegada", {}).get("etiqueta", "Fecha de Llegada")
-                fecha_llegada = st.date_input(f"{lbl_fl} (DD/MM/YYYY)", min_value=datetime(1900, 1, 1), max_value=datetime.now(), value=datetime(2010, 1, 1), format="DD/MM/YYYY")
+                fecha_llegada = st.date_input(
+                    f"{lbl_fl} (DD/MM/YYYY)", 
+                    min_value=datetime(1900, 1, 1).date(), 
+                    max_value=datetime.now().date(), 
+                    value=datetime(2010, 1, 1).date(), 
+                    format="DD/MM/YYYY"
+                )
             with col4:
                 direccion = renderizar_campo_dinamico("direccion", cfg_campos, key_suffix="reg")
 
@@ -723,7 +747,12 @@ if "📝 Registrar Habitante" in pestañas:
                         elif tipo_c == "Número":
                             datos_extra[nom_c] = st.number_input(f"{nom_c}:", value=0)
                         elif tipo_c == "Fecha":
-                            d_extra = st.date_input(f"{nom_c} (DD/MM/YYYY):", min_value=datetime(1900, 1, 1), format="DD/MM/YYYY")
+                            d_extra = st.date_input(
+                                f"{nom_c} (DD/MM/YYYY):", 
+                                min_value=datetime(1900, 1, 1).date(), 
+                                max_value=datetime.now().date(), 
+                                format="DD/MM/YYYY"
+                            )
                             datos_extra[nom_c] = d_extra.strftime("%d/%m/%Y")
             else:
                 st.info("No hay variables extra personalizadas configuradas.")
@@ -746,114 +775,7 @@ if "📝 Registrar Habitante" in pestañas:
                 st.error("⚠️ Ingrese los campos obligatorios.")
 
 # -----------------------------------------------------------------------------
-# TAB: EDITAR / ELIMINAR HABITANTE
-# -----------------------------------------------------------------------------
-if "⚙️ Editar / Eliminar" in pestañas:
-    with tabs[pestañas.index("⚙️ Editar / Eliminar")]:
-        st.subheader("⚙️ Modificación de Datos del Habitante")
-        
-        df_edit = cargar_habitantes()
-        if not df_edit.empty:
-            cedula_buscar = st.selectbox("Seleccione la persona a modificar:", df_edit["cedula"].unique())
-            hab = df_edit[df_edit["cedula"] == cedula_buscar].iloc[0]
-            
-            try:
-                dict_dyn = json.loads(hab["campos_adicionales"])
-            except:
-                dict_dyn = {}
-
-            with st.form("form_edit_unificado"):
-                st.markdown("### 👤 Datos Personales")
-                col_e1, col_e2 = st.columns(2)
-                with col_e1:
-                    e_cedula = renderizar_campo_dinamico("cedula", cfg_campos, hab['cedula'], key_suffix="edit")
-                    e_nombres = renderizar_campo_dinamico("nombres", cfg_campos, hab['nombres'], key_suffix="edit")
-                    e_apellidos = renderizar_campo_dinamico("apellidos", cfg_campos, hab['apellidos'], key_suffix="edit")
-                with col_e2:
-                    e_sexo = renderizar_campo_dinamico("sexo", cfg_campos, hab['sexo'], key_suffix="edit")
-                    
-                    fn_dt = parsear_fecha_bd(hab['fecha_nac'])
-                    lbl_fn = cfg_campos.get("fecha_nac", {}).get("etiqueta", "Fecha Nacimiento")
-                    e_fn = st.date_input(
-                        f"{lbl_fn}:", 
-                        value=fn_dt, 
-                        min_value=datetime(1900, 1, 1), 
-                        max_value=datetime.now().date(), 
-                        format="DD/MM/YYYY"
-                    )
-                    
-                    e_telefono = renderizar_campo_dinamico("telefono", cfg_campos, hab['telefono'], key_suffix="edit")
-
-                st.markdown("---")
-
-                st.markdown("### 🏠 Ubicación")
-                col_e3, col_e4 = st.columns(2)
-                with col_e3:
-                    e_manzana = renderizar_campo_dinamico("manzana", cfg_campos, hab['manzana'], key_suffix="edit")
-                    
-                    fl_dt = parsear_fecha_bd(hab['fecha_llegada'])
-                    lbl_fl = cfg_campos.get("fecha_llegada", {}).get("etiqueta", "Fecha Llegada")
-                    e_fl = st.date_input(
-                        f"{lbl_fl}:", 
-                        value=fl_dt, 
-                        min_value=datetime(1900, 1, 1), 
-                        max_value=datetime.now().date(), 
-                        format="DD/MM/YYYY"
-                    )
-                with col_e4:
-                    e_direccion = renderizar_campo_dinamico("direccion", cfg_campos, hab['direccion'], key_suffix="edit")
-
-                st.markdown("---")
-
-                st.markdown("### ⚕️ Salud")
-                col_e5, col_e6 = st.columns(2)
-                with col_e5:
-                    e_condicion_salud = renderizar_campo_dinamico("condicion_salud", cfg_campos, hab['condicion_salud'], key_suffix="edit")
-                with col_e6:
-                    e_detalle_salud = renderizar_campo_dinamico("detalle_salud", cfg_campos, hab['detalle_salud'], key_suffix="edit")
-
-                st.markdown("---")
-
-                st.markdown("### ➕ Campos Adicionales Extra")
-                e_dict_extra = {}
-                campos_cfg = cargar_campos_personalizados()
-                
-                if campos_cfg:
-                    col_ec1, col_ec2 = st.columns(2)
-                    for idx, (nom_c, tipo_c) in enumerate(campos_cfg):
-                        target_col = col_ec1 if idx % 2 == 0 else col_ec2
-                        val_prev = dict_dyn.get(nom_c, "")
-                        with target_col:
-                            if tipo_c == "Texto":
-                                e_dict_extra[nom_c] = st.text_input(f"{nom_c}:", value=str(val_prev))
-                            elif tipo_c == "Número":
-                                e_dict_extra[nom_c] = st.number_input(f"{nom_c}:", value=int(val_prev) if str(val_prev).isdigit() else 0)
-                            elif tipo_c == "Fecha":
-                                e_dict_extra[nom_c] = st.text_input(f"{nom_c} (DD/MM/YYYY):", value=str(val_prev))
-
-                st.markdown("---")
-                btn_mod = st.form_submit_button("💾 Actualizar Todos los Datos", type="primary", use_container_width=True)
-                
-                if btn_mod:
-                    datos_mod = (
-                        str(e_cedula).strip(), str(e_nombres).strip(), str(e_apellidos).strip(), str(e_sexo).strip(),
-                        e_fn.strftime("%Y-%m-%d"), e_fl.strftime("%Y-%m-%d"),
-                        str(e_direccion).strip(), str(e_manzana).strip(), str(e_telefono).strip(),
-                        str(e_condicion_salud).strip(), str(e_detalle_salud).strip(), json.dumps(e_dict_extra, ensure_ascii=False)
-                    )
-                    actualizar_habitante_completo(cedula_buscar, datos_mod)
-                    st.success("✅ Datos actualizados correctamente.")
-                    st.rerun()
-
-            if tiene_permiso("eliminar_habitantes"):
-                st.markdown("---")
-                if st.button(f"🗑️ Eliminar Registro de {hab['nombres']} {hab['apellidos']}", type="primary", use_container_width=True):
-                    eliminar_habitante(cedula_buscar)
-                    st.success("✅ Registro eliminado.")
-                    st.rerun()
-
-# -----------------------------------------------------------------------------
-# TAB: ESTADÍSTICAS (FILTROS ESPECÍFICOS DE EDAD Y SEXO)
+# TAB: ESTADÍSTICAS
 # -----------------------------------------------------------------------------
 if "📈 Estadísticas" in pestañas:
     with tabs[pestañas.index("📈 Estadísticas")]:
@@ -863,7 +785,7 @@ if "📈 Estadísticas" in pestañas:
         if not df_stat.empty:
             df_stat["edad"] = df_stat["fecha_nac"].apply(calcular_edad)
             
-            # Clasificación personalizada de grupos según lo solicitado
+            # Clasificación de rangos de edad
             def clasificar_rango_edad(edad):
                 if edad <= 12: return "0 a 12 años"
                 elif 13 <= edad <= 15: return "13 a 15 años"
@@ -873,7 +795,7 @@ if "📈 Estadísticas" in pestañas:
             
             df_stat["rango_etario"] = df_stat["edad"].apply(clasificar_rango_edad)
             
-            # Filtro por Sexo opcional para análisis dinámico
+            # Filtro por Sexo opcional
             st.markdown("##### 🔍 Filtrar Estadísticas por Sexo")
             opciones_sexo = ["Todos"] + list(df_stat["sexo"].unique())
             sexo_filtro = st.selectbox("Seleccione para filtrar las métricas:", opciones_sexo)
@@ -885,7 +807,7 @@ if "📈 Estadísticas" in pestañas:
 
             st.markdown("---")
             
-            # Métricas específicas solicitadas
+            # Métricas
             kpi_e1, kpi_e2, kpi_e3, kpi_e4, kpi_e5 = st.columns(5)
             kpi_e1.metric("Población Seleccionada", len(df_stat_calc))
             kpi_e2.metric("Niños (0 a 12 años)", len(df_stat_calc[df_stat_calc["edad"] <= 12]))
