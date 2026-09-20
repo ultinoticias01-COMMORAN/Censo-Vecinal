@@ -20,6 +20,7 @@ CAMPOS_BASE_DEFAULT = {
     "sexo": ("Sexo / Género", "desplegable", json.dumps(["Femenino", "Masculino", "Otro"])),
     "fecha_nac": ("Fecha de Nacimiento", "texto", "[]"),
     "telefono": ("Teléfono de Contacto", "texto", "[]"),
+    "parentesco": ("Rol / Parentesco Familiar", "desplegable", json.dumps(["Jefe(a) de Familia", "Cónyuge / Pareja", "Hijo(a)", "Padre / Madre", "Nieto(a)", "Hermano(a)", "Otro Familiar", "No Familiar"])),
     "manzana": ("Manzana / Sector", "texto", "[]"),
     "fecha_llegada": ("Fecha de Llegada a la Comunidad", "texto", "[]"),
     "direccion": ("Dirección Detallada de Habitación", "texto", "[]"),
@@ -56,12 +57,19 @@ def init_db():
             direccion TEXT,
             manzana TEXT,
             telefono TEXT,
+            parentesco TEXT DEFAULT 'Otro Familiar',
             condicion_salud TEXT DEFAULT 'Ninguna',
             detalle_salud TEXT DEFAULT '',
             campos_adicionales TEXT DEFAULT '{}'
         )
     """)
     
+    # Migración defensiva para la columna parentesco en instalaciones existentes
+    cursor.execute("PRAGMA table_info(habitantes)")
+    cols_habitantes = [column[1] for column in cursor.fetchall()]
+    if "parentesco" not in cols_habitantes:
+        cursor.execute("ALTER TABLE habitantes ADD COLUMN parentesco TEXT DEFAULT 'Otro Familiar'")
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             username TEXT PRIMARY KEY,
@@ -92,7 +100,6 @@ def init_db():
         )
     """)
     
-    # Migración defensiva para configuracion_estilo_campos
     cursor.execute("PRAGMA table_info(configuracion_estilo_campos)")
     cols_estilo = [column[1] for column in cursor.fetchall()]
     if "opciones_json" not in cols_estilo:
@@ -116,7 +123,6 @@ def init_db():
         )
     """)
     
-    # Creación y migración de la tabla de campos personalizados
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS configuracion_campos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -229,6 +235,7 @@ def cargar_habitantes():
     conn.close()
     
     df["sexo"] = df["sexo"].fillna("No especificado")
+    df["parentesco"] = df["parentesco"].fillna("Otro Familiar")
     df["condicion_salud"] = df["condicion_salud"].fillna("Ninguna")
     df["detalle_salud"] = df["detalle_salud"].fillna("")
     df["campos_adicionales"] = df["campos_adicionales"].fillna("{}")
@@ -240,8 +247,8 @@ def guardar_habitante(datos):
     cursor.execute("""
         INSERT OR REPLACE INTO habitantes (
             cedula, nombres, apellidos, sexo, fecha_nac, fecha_llegada, 
-            direccion, manzana, telefono, condicion_salud, detalle_salud, campos_adicionales
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            direccion, manzana, telefono, parentesco, condicion_salud, detalle_salud, campos_adicionales
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, datos)
     conn.commit()
     conn.close()
@@ -258,8 +265,8 @@ def actualizar_habitante_completo(cedula_original, datos_nuevos):
     cursor.execute("""
         INSERT OR REPLACE INTO habitantes (
             cedula, nombres, apellidos, sexo, fecha_nac, fecha_llegada, 
-            direccion, manzana, telefono, condicion_salud, detalle_salud, campos_adicionales
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            direccion, manzana, telefono, parentesco, condicion_salud, detalle_salud, campos_adicionales
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, datos_nuevos)
     
     conn.commit()
@@ -299,12 +306,11 @@ def obtener_bitacora_habitante(cedula):
     conn.close()
     return df
 
-# --- CAMPOS ADICIONALES DINÁMICOS Y PERSONALIZADOS CON AUTO-REPARACIÓN ---
+# --- CAMPOS ADICIONALES DINÁMICOS Y PERSONALIZADOS ---
 def cargar_campos_personalizados():
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Creación y migración garantizada antes de consultar
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS configuracion_campos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -469,7 +475,7 @@ with st.sidebar:
         st.rerun()
         
     st.markdown("---")
-    st.caption("Sistema de Censo Comunitario v5.5")
+    st.caption("Sistema de Censo Comunitario v6.0")
 
 # -----------------------------------------------------------------------------
 # 6. NAVEGACIÓN Y PESTAÑAS DINÁMICAS
@@ -512,7 +518,7 @@ if "📊 Consultar y Filtros" in pestañas:
             
             col_search1, col_search2 = st.columns([3, 1])
             with col_search1:
-                busqueda = st.text_input("🔍 Buscar en TODOS los campos (Cédula, Nombres, Dirección, Salud, Teléfono, etc.):", placeholder="Escriba cualquier dato para buscar...")
+                busqueda = st.text_input("🔍 Buscar en TODOS los campos (Cédula, Nombres, Dirección, Parentesco, Salud, etc.):", placeholder="Escriba cualquier dato para buscar...")
             with col_search2:
                 vista_modo = st.radio("Modo de vista:", ["Tarjetas Visuales", "Tabla Resumida"], horizontal=True)
 
@@ -552,14 +558,14 @@ if "📊 Consultar y Filtros" in pestañas:
                     cedula_curr = hab["cedula"]
                     nombre_completo = f"{hab['nombres']} {hab['apellidos']}"
                     
-                    with st.expander(f"👤 **{nombre_completo}** — Cédula: `{cedula_curr}` | Manzana: {hab['manzana']}", expanded=bool(busqueda.strip())):
+                    with st.expander(f"👤 **{nombre_completo}** — Cédula: `{cedula_curr}` | Parentesco: **{hab['parentesco']}** | Manzana: {hab['manzana']}", expanded=bool(busqueda.strip())):
                         
                         kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
                         kpi1.metric("🎂 Edad", f"{hab['edad_num']} años")
                         kpi2.metric("🏠 Tiempo Comunidad", f"{hab['tiempo_comunidad_num']} años")
                         kpi3.metric("👫 Sexo", hab['sexo'])
-                        kpi4.metric("📞 Teléfono", hab['telefono'] if hab['telefono'] else "Sin datos")
-                        kpi5.metric("🏘️ Manzana / Sector", hab['manzana'])
+                        kpi4.metric("👑 Parentesco", hab['parentesco'])
+                        kpi5.metric("📞 Teléfono", hab['telefono'] if hab['telefono'] else "Sin datos")
 
                         st.markdown("---")
                         
@@ -568,6 +574,7 @@ if "📊 Consultar y Filtros" in pestañas:
                             st.markdown("##### 📌 Datos Personales y Habitación")
                             st.write(f"**Fecha de Nacimiento:** {formato_fecha_pantalla(hab['fecha_nac'])}")
                             st.write(f"**Fecha de Llegada:** {formato_fecha_pantalla(hab['fecha_llegada'])}")
+                            st.write(f"**Manzana / Sector:** {hab['manzana']}")
                             st.write(f"**Dirección Detallada:** {hab['direccion']}")
 
                         with col_info2:
@@ -614,6 +621,11 @@ if "📊 Consultar y Filtros" in pestañas:
                                     e_tel = st.text_input("Teléfono:", value=hab['telefono'])
                                 with col_ins2:
                                     e_sex = st.selectbox("Sexo:", ["Femenino", "Masculino", "Otro"], index=0 if hab['sexo']=="Femenino" else (1 if hab['sexo']=="Masculino" else 2))
+                                    
+                                    ops_parentesco = ["Jefe(a) de Familia", "Cónyuge / Pareja", "Hijo(a)", "Padre / Madre", "Nieto(a)", "Hermano(a)", "Otro Familiar", "No Familiar"]
+                                    idx_par = ops_parentesco.index(hab['parentesco']) if hab['parentesco'] in ops_parentesco else 6
+                                    e_par = st.selectbox("Rol / Parentesco Familiar:", ops_parentesco, index=idx_par)
+                                    
                                     e_fn = st.date_input(
                                         "Fecha Nacimiento:", 
                                         value=parsear_fecha_bd(hab['fecha_nac']), 
@@ -638,7 +650,7 @@ if "📊 Consultar y Filtros" in pestañas:
                                     datos_actualizados = (
                                         e_ced.strip(), e_nom.strip(), e_ape.strip(), e_sex,
                                         e_fn.strftime("%Y-%m-%d"), e_fl.strftime("%Y-%m-%d"),
-                                        e_dir.strip(), e_man.strip(), e_tel.strip(),
+                                        e_dir.strip(), e_man.strip(), e_tel.strip(), e_par,
                                         e_sal.strip(), e_detsal.strip(), hab['campos_adicionales']
                                     )
                                     actualizar_habitante_completo(cedula_curr, datos_actualizados)
@@ -653,7 +665,7 @@ if "📊 Consultar y Filtros" in pestañas:
                 df_tabla["fecha_nac"] = df_tabla["fecha_nac"].apply(formato_fecha_pantalla)
                 df_tabla["fecha_llegada"] = df_tabla["fecha_llegada"].apply(formato_fecha_pantalla)
                 
-                cols_mostrar = ["cedula", "nombres", "apellidos", "sexo", "Edad", "Años Comunidad", "manzana", "telefono", "condicion_salud"]
+                cols_mostrar = ["cedula", "nombres", "apellidos", "parentesco", "sexo", "Edad", "Años Comunidad", "manzana", "telefono", "condicion_salud"]
                 st.dataframe(df_tabla[cols_mostrar], use_container_width=True, hide_index=True)
         else:
             st.info("No hay registros cargados en la base de datos.")
@@ -723,6 +735,7 @@ if "📝 Registrar Habitante" in pestañas:
                 cedula = renderizar_campo_dinamico("cedula", cfg_campos, key_suffix="reg")
                 nombres = renderizar_campo_dinamico("nombres", cfg_campos, key_suffix="reg")
                 apellidos = renderizar_campo_dinamico("apellidos", cfg_campos, key_suffix="reg")
+                parentesco = renderizar_campo_dinamico("parentesco", cfg_campos, key_suffix="reg")
             with col2:
                 sexo = renderizar_campo_dinamico("sexo", cfg_campos, key_suffix="reg")
                 lbl_fn = cfg_campos.get("fecha_nac", {}).get("etiqueta", "Fecha de Nacimiento")
@@ -790,7 +803,7 @@ if "📝 Registrar Habitante" in pestañas:
                     str(cedula).strip(), str(nombres).strip(), str(apellidos).strip(), str(sexo).strip(),
                     fecha_nac.strftime("%Y-%m-%d"), fecha_llegada.strftime("%Y-%m-%d"),
                     str(direccion).strip(), str(manzana).strip(), str(telefono).strip(),
-                    str(condicion_salud).strip(), str(detalle_salud).strip(), json_extra
+                    str(parentesco).strip(), str(condicion_salud).strip(), str(detalle_salud).strip(), json_extra
                 )
                 guardar_habitante(datos)
                 st.success(f"✅ Registro de {nombres} {apellidos} guardado exitosamente.")
@@ -828,18 +841,23 @@ if "📈 Estadísticas" in pestañas:
 
             st.markdown("---")
             
-            kpi_e1, kpi_e2, kpi_e3, kpi_e4, kpi_e5 = st.columns(5)
+            kpi_e1, kpi_e2, kpi_e3, kpi_e4, kpi_e5, kpi_e6 = st.columns(6)
             kpi_e1.metric("Población Seleccionada", len(df_stat_calc))
-            kpi_e2.metric("Niños (0 a 12 años)", len(df_stat_calc[df_stat_calc["edad"] <= 12]))
-            kpi_e3.metric("Mayores de 15 años", len(df_stat_calc[df_stat_calc["edad"] > 15]))
-            kpi_e4.metric("Mayores de 18 años", len(df_stat_calc[df_stat_calc["edad"] >= 18]))
-            kpi_e5.metric("Mayores de 60 años", len(df_stat_calc[df_stat_calc["edad"] >= 60]))
+            kpi_e2.metric("Jefes de Familia", len(df_stat_calc[df_stat_calc["parentesco"] == "Jefe(a) de Familia"]))
+            kpi_e3.metric("Niños (0 a 12 años)", len(df_stat_calc[df_stat_calc["edad"] <= 12]))
+            kpi_e4.metric("Mayores de 15 años", len(df_stat_calc[df_stat_calc["edad"] > 15]))
+            kpi_e5.metric("Mayores de 18 años", len(df_stat_calc[df_stat_calc["edad"] >= 18]))
+            kpi_e6.metric("Mayores de 60 años", len(df_stat_calc[df_stat_calc["edad"] >= 60]))
 
             st.markdown("---")
             
             col_g1, col_g2 = st.columns(2)
             
             with col_g1:
+                st.markdown("##### 👨‍👩‍👧‍👦 Distribución por Rol / Parentesco Familiar")
+                fig_par = px.pie(df_stat, names="parentesco", hole=0.4, color_discrete_sequence=px.colors.qualitative.Bold)
+                st.plotly_chart(fig_par, use_container_width=True)
+
                 st.markdown("##### 📊 Rangos de Edad Distribuidos por Sexo")
                 df_edad_sexo = df_stat.groupby(["rango_etario", "sexo"]).size().reset_index(name="Cantidad")
                 fig_edad_sexo = px.bar(
@@ -853,11 +871,11 @@ if "📈 Estadísticas" in pestañas:
                 )
                 st.plotly_chart(fig_edad_sexo, use_container_width=True)
 
+            with col_g2:
                 st.markdown("##### 👥 Distribución Total por Sexo / Género")
                 fig_sexo = px.pie(df_stat, names="sexo", hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
                 st.plotly_chart(fig_sexo, use_container_width=True)
 
-            with col_g2:
                 st.markdown("##### 🏘️ Habitantes por Manzana y Sexo")
                 df_manzana_sexo = df_stat.groupby(["manzana", "sexo"]).size().reset_index(name="Habitantes")
                 fig_manz_sexo = px.bar(
@@ -870,19 +888,19 @@ if "📈 Estadísticas" in pestañas:
                 )
                 st.plotly_chart(fig_manz_sexo, use_container_width=True)
 
-                st.markdown("##### ⚕️ Condición de Salud por Sexo")
-                df_salud_sexo = df_stat[df_stat["condicion_salud"] != "Ninguna"].groupby(["condicion_salud", "sexo"]).size().reset_index(name="Casos")
-                if not df_salud_sexo.empty:
-                    fig_salud_sex = px.bar(
-                        df_salud_sexo, 
-                        x="condicion_salud", 
-                        y="Casos", 
-                        color="sexo", 
-                        title="Afectaciones de Salud por Sexo"
-                    )
-                    st.plotly_chart(fig_salud_sex, use_container_width=True)
-                else:
-                    st.info("No hay condiciones de salud especiales registradas.")
+            st.markdown("##### ⚕️ Condición de Salud por Sexo")
+            df_salud_sexo = df_stat[df_stat["condicion_salud"] != "Ninguna"].groupby(["condicion_salud", "sexo"]).size().reset_index(name="Casos")
+            if not df_salud_sexo.empty:
+                fig_salud_sex = px.bar(
+                    df_salud_sexo, 
+                    x="condicion_salud", 
+                    y="Casos", 
+                    color="sexo", 
+                    title="Afectaciones de Salud por Sexo"
+                )
+                st.plotly_chart(fig_salud_sex, use_container_width=True)
+            else:
+                st.info("No hay condiciones de salud especiales registradas.")
         else:
             st.info("📊 No hay datos suficientes para generar estadísticas.")
 
@@ -1088,6 +1106,7 @@ if "💾 Respaldos y Borrado" in pestañas:
                             str(row.get("direccion", "")).strip(),
                             str(row.get("manzana", "")).strip(),
                             str(row.get("telefono", "")).strip(),
+                            str(row.get("parentesco", row.get("rol_familiar", "Otro Familiar"))).strip(),
                             str(row.get("condicion_salud", "Ninguna")).strip(),
                             str(row.get("detalle_salud", "")).strip(),
                             str(row.get("campos_adicionales", "{}")).strip()
