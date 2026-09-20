@@ -504,7 +504,7 @@ with st.sidebar:
         st.rerun()
         
     st.markdown("---")
-    st.caption("Sistema de Censo Comunitario v7.4")
+    st.caption("Sistema de Censo Comunitario v7.5")
 
 # -----------------------------------------------------------------------------
 # 6. NAVEGACIÓN Y PESTAÑAS DINÁMICAS
@@ -561,7 +561,6 @@ if "📊 Consultar y Filtros" in pestañas:
             with col_search3:
                 vista_modo = st.radio("Modo de vista:", ["Tarjetas Visuales", "Tabla Resumida"], horizontal=True)
 
-            # FILTRO DE EDAD / RANGO ELECTORAL
             with st.expander("🗳️ Filtros Avanzados y Rango de Edad (Padrón Electoral)", expanded=False):
                 col_ed1, col_ed2, col_ed3 = st.columns(3)
                 with col_ed1:
@@ -1030,7 +1029,7 @@ if "📈 Estadísticas" in pestañas:
             kpi_e1, kpi_e2, kpi_e3, kpi_e4, kpi_e5 = st.columns(5)
             kpi_e1.metric("Población Seleccionada", len(df_stat_calc))
             kpi_e2.metric("Niños (0 a 12 años)", len(df_stat_calc[df_stat_calc["edad"] <= 12]))
-            kpi_e3.metric("Mayores de 15 años o  mas", len(df_stat_calc[df_stat_calc["edad"] >= 15]))
+            kpi_e3.metric("15 años o más", len(df_stat_calc[df_stat_calc["edad"] >= 15]))
             kpi_e4.metric("Mayores de 18 años", len(df_stat_calc[df_stat_calc["edad"] >= 18]))
             kpi_e5.metric("Mayores de 60 años", len(df_stat_calc[df_stat_calc["edad"] >= 60]))
 
@@ -1257,30 +1256,63 @@ if st.session_state.rol_actual == "Master" and "👥 Usuarios y Permisos" in pes
                 st.rerun()
 
 # -----------------------------------------------------------------------------
-# TAB: RESPALDOS Y BORRADO TOTAL
+# TAB: RESPALDOS Y BORRADO (MEJORADO)
 # -----------------------------------------------------------------------------
 if "💾 Respaldos y Borrado" in pestañas:
     with tabs[pestañas.index("💾 Respaldos y Borrado")]:
-        st.subheader("💾 Gestión de Respaldos e Importación")
+        st.subheader("💾 Gestión Integral de Respaldos y Restauración del Sistema")
         
         col_res1, col_res2 = st.columns(2)
         
         with col_res1:
-            st.markdown("### 📤 Exportar Datos General")
+            st.markdown("### 📤 Respaldo Estructural General (Sistema Completo)")
+            st.info("💡 Este respaldo incluye **todo el sistema**: habitantes, usuarios, contraseñas, permisos, bitácoras de documentos y configuraciones.")
+            
+            try:
+                with open(DB_FILE, "rb") as f:
+                    db_bytes = f.read()
+                st.download_button(
+                    label="📥 Descargar Base de Datos Completa (.db)",
+                    data=db_bytes,
+                    file_name=f"backup_sistema_censo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db",
+                    mime="application/x-sqlite3",
+                    help="Descarga el archivo completo de la base de datos sqlite.",
+                    use_container_width=True
+                )
+            except Exception as e:
+                st.error(f"No se pudo leer la base de datos: {e}")
+
+            st.markdown("---")
+            st.markdown("### 📥 Exportar Planillas Sueltas (Excel / CSV)")
             df_exp = cargar_habitantes()
             if not df_exp.empty:
                 csv_bytes = df_exp.to_csv(index=False, sep=";", encoding="utf-8-sig")
-                st.download_button("📥 Descargar Censo Completo (CSV)", csv_bytes, "censo_comunidad_completo.csv", "text/csv")
+                st.download_button("📥 Descargar Habitantes (CSV)", csv_bytes, "censo_comunidad_habitantes.csv", "text/csv", use_container_width=True)
                 
                 buffer_exc = io.BytesIO()
                 with pd.ExcelWriter(buffer_exc, engine='openpyxl') as writer:
                     df_exp.to_excel(writer, index=False, sheet_name="Censo")
-                st.download_button("📊 Descargar Censo Completo (Excel)", buffer_exc.getvalue(), "censo_comunidad_completo.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                st.download_button("📊 Descargar Habitantes (Excel)", buffer_exc.getvalue(), "censo_comunidad_habitantes.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
         with col_res2:
-            st.markdown("### 📥 Importar Archivos (CSV / Excel)")
-            uploaded_file = st.file_uploader("Cargar archivo", type=["csv", "xlsx"])
-            if uploaded_file is not None and st.button("📥 Procesar e Importar"):
+            st.markdown("### 🔄 Restaurar Sistema Completo (.db)")
+            st.warning("⚠️ Subir un archivo de base de datos `.db` sobrescribirá por completo la información actual del sistema.")
+            
+            db_upload = st.file_uploader("Cargar archivo de respaldo previo (.db)", type=["db", "sqlite"], key="upload_db_backup")
+            if db_upload is not None:
+                if st.button("🚀 Aplicar Restauración del Sistema", type="primary", use_container_width=True):
+                    try:
+                        with open(DB_FILE, "wb") as f:
+                            f.write(db_upload.getbuffer())
+                        st.success("✅ ¡Sistema restaurado con éxito! Recargando aplicación...")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al restaurar la base de datos: {e}")
+
+            st.markdown("---")
+            st.markdown("### 📥 Importar Planilla de Habitantes (CSV / Excel)")
+            uploaded_file = st.file_uploader("Cargar planilla de datos", type=["csv", "xlsx"], key="upload_plan")
+            if uploaded_file is not None and st.button("📥 Procesar e Importar Planilla", use_container_width=True):
                 try:
                     if uploaded_file.name.endswith(".xlsx"):
                         df_imp = pd.read_excel(uploaded_file, dtype=str)
