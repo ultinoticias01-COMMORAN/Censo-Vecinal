@@ -504,7 +504,7 @@ with st.sidebar:
         st.rerun()
         
     st.markdown("---")
-    st.caption("Sistema de Censo Comunitario v7.3")
+    st.caption("Sistema de Censo Comunitario v7.4")
 
 # -----------------------------------------------------------------------------
 # 6. NAVEGACIÓN Y PESTAÑAS DINÁMICAS
@@ -538,7 +538,7 @@ tabs = st.tabs(pestañas)
 # -----------------------------------------------------------------------------
 if "📊 Consultar y Filtros" in pestañas:
     with tabs[pestañas.index("📊 Consultar y Filtros")]:
-        st.subheader("📊 Búsqueda Global y Consulta de Grupo Familiar")
+        st.subheader("📊 Búsqueda Global, Filtros electorales y Consulta de Grupo Familiar")
         df = cargar_habitantes()
         
         if not df.empty:
@@ -561,6 +561,16 @@ if "📊 Consultar y Filtros" in pestañas:
             with col_search3:
                 vista_modo = st.radio("Modo de vista:", ["Tarjetas Visuales", "Tabla Resumida"], horizontal=True)
 
+            # FILTRO DE EDAD / RANGO ELECTORAL
+            with st.expander("🗳️ Filtros Avanzados y Rango de Edad (Padrón Electoral)", expanded=False):
+                col_ed1, col_ed2, col_ed3 = st.columns(3)
+                with col_ed1:
+                    activar_filtro_edad = st.checkbox("Activar filtro por Rango de Edad / Electoral", value=False)
+                with col_ed2:
+                    edad_min = st.number_input("Edad mínima (años):", min_value=0, max_value=120, value=15)
+                with col_ed3:
+                    edad_max = st.number_input("Edad máxima (años):", min_value=0, max_value=120, value=120)
+
             df_filtrado = df.copy()
             if busqueda.strip():
                 df_filtrado = df_filtrado[df_filtrado.apply(lambda row: row.astype(str).str.contains(busqueda, case=False).any(), axis=1)]
@@ -568,27 +578,30 @@ if "📊 Consultar y Filtros" in pestañas:
             if jefe_filtro_sel != "TODOS":
                 df_filtrado = df_filtrado[(df_filtrado["cedula"] == jefe_filtro_sel) | (df_filtrado["jefe_hogar_cedula"] == jefe_filtro_sel)]
 
-            st.caption(f"Mostrando {len(df_filtrado)} registro(s) encontrado(s).")
+            if activar_filtro_edad:
+                df_filtrado = df_filtrado[(df_filtrado["edad_num"] >= edad_min) & (df_filtrado["edad_num"] <= edad_max)]
+
+            st.caption(f"Mostrando {len(df_filtrado)} registro(s) encontrado(s) con los filtros actuales.")
 
             if not df_filtrado.empty:
                 col_dl1, col_dl2, _ = st.columns([1, 1, 2])
                 with col_dl1:
                     csv_data = df_filtrado.to_csv(index=False, sep=";", encoding="utf-8-sig")
                     st.download_button(
-                        label="📥 Descargar Encontrados (CSV)",
+                        label="📥 Descargar Encontrados / Padrón (CSV)",
                         data=csv_data,
-                        file_name=f"censo_busqueda_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        file_name=f"padron_electoral_censo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                         mime="text/csv",
                         use_container_width=True
                     )
                 with col_dl2:
                     buffer_excel = io.BytesIO()
                     with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
-                        df_filtrado.to_excel(writer, index=False, sheet_name="Resultados")
+                        df_filtrado.to_excel(writer, index=False, sheet_name="PadronElectoral")
                     st.download_button(
-                        label="📊 Descargar Encontrados (Excel)",
+                        label="📊 Descargar Encontrados / Padrón (Excel)",
                         data=buffer_excel.getvalue(),
-                        file_name=f"censo_busqueda_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                        file_name=f"padron_electoral_censo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True
                     )
@@ -927,7 +940,6 @@ if "📝 Registrar Habitante" in pestañas:
                 )
                 guardar_habitante(datos)
                 
-                # REINICIO LIMPIO DE TODOS LOS CAMPOS
                 for key_campo in cfg_campos.keys():
                     key_w = f"{key_campo}_reg"
                     cfg = cfg_campos.get(key_campo, {})
@@ -1036,8 +1048,10 @@ if "📈 Estadísticas" in pestañas:
                     color="sexo", 
                     barmode="group",
                     title="Comparativa de Edades por Sexo",
-                    color_discrete_sequence=px.colors.qualitative.Set2
+                    color_discrete_sequence=px.colors.qualitative.Set2,
+                    text="Cantidad"
                 )
+                fig_edad_sexo.update_traces(textposition="outside")
                 st.plotly_chart(fig_edad_sexo, use_container_width=True)
 
                 st.markdown("##### 👥 Distribución Total por Sexo / Género")
@@ -1052,9 +1066,12 @@ if "📈 Estadísticas" in pestañas:
                     x="manzana", 
                     y="Habitantes", 
                     color="sexo", 
+                    barmode="group",
                     title="Habitantes por Manzana desglosados por Sexo",
-                    color_discrete_sequence=px.colors.qualitative.Safe
+                    color_discrete_sequence=px.colors.qualitative.Safe,
+                    text="Habitantes"
                 )
+                fig_manz_sexo.update_traces(textposition="outside")
                 st.plotly_chart(fig_manz_sexo, use_container_width=True)
 
                 st.markdown("##### ⚕️ Condición de Salud por Sexo")
@@ -1065,8 +1082,11 @@ if "📈 Estadísticas" in pestañas:
                         x="condicion_salud", 
                         y="Casos", 
                         color="sexo", 
-                        title="Afectaciones de Salud por Sexo"
+                        barmode="group",
+                        title="Afectaciones de Salud por Sexo",
+                        text="Casos"
                     )
+                    fig_salud_sex.update_traces(textposition="outside")
                     st.plotly_chart(fig_salud_sex, use_container_width=True)
                 else:
                     st.info("No hay condiciones de salud especiales registradas.")
@@ -1274,7 +1294,6 @@ if "💾 Respaldos y Borrado" in pestañas:
                             uploaded_file.seek(0)
                             df_imp = pd.read_csv(uploaded_file, sep=",", dtype=str)
 
-                    # Limpieza flexible de encabezados
                     df_imp.columns = [str(col).strip().lower().replace(" ", "_") for col in df_imp.columns]
 
                     def buscar_valor_columna(row, lista_posibles):
