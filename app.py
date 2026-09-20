@@ -43,7 +43,6 @@ LISTA_PERMISOS = [
 # 2. FUNCIONES DE BASE DE DATOS Y MIGRACIONES
 # -----------------------------------------------------------------------------
 def hash_password(password: str) -> str:
-    """Retorna el hash SHA-256 de la contraseña introducida."""
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 def get_connection():
@@ -53,7 +52,6 @@ def init_db():
     with get_connection() as conn:
         cursor = conn.cursor()
         
-        # Tabla de Habitantes (con soporte para Jefe de Hogar)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS habitantes (
                 cedula TEXT PRIMARY KEY,
@@ -73,7 +71,6 @@ def init_db():
             )
         """)
         
-        # Migraciones automáticas de columnas para bases de datos previas
         cursor.execute("PRAGMA table_info(habitantes)")
         cols_hab = [column[1] for column in cursor.fetchall()]
         if "es_jefe_hogar" not in cols_hab:
@@ -81,7 +78,6 @@ def init_db():
         if "jefe_hogar_cedula" not in cols_hab:
             cursor.execute("ALTER TABLE habitantes ADD COLUMN jefe_hogar_cedula TEXT DEFAULT ''")
 
-        # Tabla de Usuarios
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS usuarios (
                 username TEXT PRIMARY KEY,
@@ -103,7 +99,6 @@ def init_db():
             cursor.execute("UPDATE usuarios SET permisos = ? WHERE username = 'admin'", (perm_admin,))
             cursor.execute("UPDATE usuarios SET permisos = ? WHERE username = 'user'", (perm_user,))
 
-        # Migración automática de contraseñas a SHA-256
         cursor.execute("SELECT username, password FROM usuarios")
         usuarios_existentes = cursor.fetchall()
         
@@ -121,7 +116,6 @@ def init_db():
                     pwd_encriptada = hash_password(pwd)
                     cursor.execute("UPDATE usuarios SET password = ? WHERE username = ?", (pwd_encriptada, user))
 
-        # Tabla Estilos y Campos Base
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS configuracion_estilo_campos (
                 clave_campo TEXT PRIMARY KEY,
@@ -142,7 +136,6 @@ def init_db():
                 VALUES (?, ?, ?, ?)
             """, (clave, etiqueta_def, tipo_def, opciones_def))
 
-        # Tabla Bitácora
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS bitacora_documentos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -155,7 +148,6 @@ def init_db():
             )
         """)
         
-        # Tabla Campos Personalizados
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS configuracion_campos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -331,7 +323,7 @@ def obtener_bitacora_habitante(cedula):
         )
     return df
 
-# --- GESTIÓN DE CAMPOS PERSONALIZADOS (AÑADIR, RENOMBRAR, CAMBIAR TIPO, ELIMINAR) ---
+# --- GESTIÓN DE CAMPOS PERSONALIZADOS ---
 def cargar_campos_personalizados():
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -363,7 +355,6 @@ def agregar_campo_personalizado(nombre, tipo, opciones_lista):
             pass
 
 def actualizar_campo_personalizado(id_campo, nuevo_nombre, nuevo_tipo, opciones_lista):
-    """Actualiza la definición del campo y migra la clave en las estructuras JSON de habitantes[cite: 5]."""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT nombre_campo FROM configuracion_campos WHERE id = ?", (id_campo,))
@@ -375,7 +366,6 @@ def actualizar_campo_personalizado(id_campo, nuevo_nombre, nuevo_tipo, opciones_
         opciones_json = json.dumps([op.strip() for op in opciones_lista if op.strip()], ensure_ascii=False)
         cursor.execute("UPDATE configuracion_campos SET nombre_campo = ?, tipo_campo = ?, opciones_json = ? WHERE id = ?", (nuevo_nombre, nuevo_tipo, opciones_json, id_campo))
         
-        # Si cambió el nombre del campo, actualizar las llaves en los registros JSON de la base de datos[cite: 5]
         if nombre_antiguo != nuevo_nombre:
             cursor.execute("SELECT cedula, campos_adicionales FROM habitantes")
             habitantes = cursor.fetchall()
@@ -390,7 +380,6 @@ def actualizar_campo_personalizado(id_campo, nuevo_nombre, nuevo_tipo, opciones_
         conn.commit()
 
 def eliminar_campo_personalizado(id_campo):
-    """Elimina el campo de la configuración y de los registros JSON guardados para mantener la coherencia[cite: 5]."""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT nombre_campo FROM configuracion_campos WHERE id = ?", (id_campo,))
@@ -550,7 +539,7 @@ if not pestañas:
 tabs = st.tabs(pestañas)
 
 # -----------------------------------------------------------------------------
-# TAB: CONSULTAR Y FILTROS (INCLUYE CONSULTA DE GRUPO FAMILIAR)
+# TAB: CONSULTAR Y FILTROS (MOSTRANDO FAMILIARES ASOCIADOS AL JEFE DE FAMILIA)
 # -----------------------------------------------------------------------------
 if "📊 Consultar y Filtros" in pestañas:
     with tabs[pestañas.index("📊 Consultar y Filtros")]:
@@ -567,7 +556,6 @@ if "📊 Consultar y Filtros" in pestañas:
                 busqueda = st.text_input("🔍 Buscar por texto:", placeholder="Cédula, Nombres, Dirección, etc...")
             
             with col_search2:
-                # CONSULTA DE GRUPO FAMILIAR[cite: 5]
                 jefes_lista = obtener_jefes_hogar()
                 opciones_jefes = [("TODOS", "👨‍👩‍👧‍👦 -- Ver Todos los Grupos --")] + [(j[0], f"🏡 {j[1]} {j[2]} (C.I: {j[0]})") for j in jefes_lista]
                 
@@ -585,7 +573,6 @@ if "📊 Consultar y Filtros" in pestañas:
                 df_filtrado = df_filtrado[df_filtrado.apply(lambda row: row.astype(str).str.contains(busqueda, case=False).any(), axis=1)]
             
             if jefe_filtro_sel != "TODOS":
-                # Muestra al Jefe de Hogar seleccionado Y a todos los habitantes vinculados a su Cédula[cite: 5]
                 df_filtrado = df_filtrado[(df_filtrado["cedula"] == jefe_filtro_sel) | (df_filtrado["jefe_hogar_cedula"] == jefe_filtro_sel)]
 
             st.caption(f"Mostrando {len(df_filtrado)} registro(s) encontrado(s).")
@@ -618,10 +605,16 @@ if "📊 Consultar y Filtros" in pestañas:
                 for idx, hab in df_filtrado.iterrows():
                     cedula_curr = hab["cedula"]
                     nombre_completo = f"{hab['nombres']} {hab['apellidos']}"
+                    es_jefe_flag = (hab['es_jefe_hogar'] == 1)
+                    rol_familiar = "👑 JEFE DE HOGAR" if es_jefe_flag else "👨‍👩‍👧‍👦 Cargas / Familiar"
                     
-                    rol_familiar = "👑 JEFE DE HOGAR" if hab['es_jefe_hogar'] == 1 else "👨‍👩‍👧‍👦 Cargas / Familiar"
+                    # MODIFICACIÓN 1: Mostrar personas asociadas cuando es Jefe de Hogar
+                    cargas_asociadas = df[df["jefe_hogar_cedula"] == cedula_curr] if es_jefe_flag else pd.DataFrame()
+                    num_cargas = len(cargas_asociadas)
                     
-                    with st.expander(f"👤 **{nombre_completo}** (`{rol_familiar}`) — Cédula: `{cedula_curr}` | Manzana: {hab['manzana']}", expanded=bool(busqueda.strip() or jefe_filtro_sel != "TODOS")):
+                    badge_cargas = f" | 👨‍👩‍👧‍👦 {num_cargas} Familiar(es) a cargo" if es_jefe_flag else ""
+                    
+                    with st.expander(f"👤 **{nombre_completo}** (`{rol_familiar}`) — C.I: `{cedula_curr}` | Manzana: {hab['manzana']}{badge_cargas}", expanded=bool(busqueda.strip() or jefe_filtro_sel != "TODOS")):
                         
                         kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
                         kpi1.metric("🎂 Edad", f"{hab['edad_num']} años")
@@ -636,7 +629,7 @@ if "📊 Consultar y Filtros" in pestañas:
                         with col_info1:
                             st.markdown("##### 📌 Datos Personales y Familiares")
                             st.write(f"**Condición Familiar:** {rol_familiar}")
-                            if hab['es_jefe_hogar'] == 0 and hab['jefe_hogar_cedula']:
+                            if not es_jefe_flag and hab['jefe_hogar_cedula']:
                                 match_jefe = df[df["cedula"] == hab['jefe_hogar_cedula']]
                                 if not match_jefe.empty:
                                     j_nom = f"{match_jefe.iloc[0]['nombres']} {match_jefe.iloc[0]['apellidos']}"
@@ -661,6 +654,26 @@ if "📊 Consultar y Filtros" in pestañas:
                                         st.write(f"- *{k_ext}:* {v_ext}")
                             except Exception:
                                 pass
+
+                        # DESPLIEGUE DIRECTO DE PERSONAS ASOCIADAS AL JEFE DE FAMILIA
+                        if es_jefe_flag:
+                            st.markdown("---")
+                            st.markdown(f"##### 👨‍👩‍👧‍👦 Cargas / Familiares Vinculados a {nombre_completo} ({num_cargas})")
+                            if not cargas_asociadas.empty:
+                                df_cargas_show = cargas_asociadas.copy()
+                                df_cargas_show["Edad"] = df_cargas_show["fecha_nac"].apply(calcular_edad)
+                                df_cargas_show["Fecha Nac."] = df_cargas_show["fecha_nac"].apply(formato_fecha_pantalla)
+                                df_cargas_show["Nombre Completo"] = df_cargas_show["nombres"] + " " + df_cargas_show["apellidos"]
+                                
+                                cols_cargas = ["cedula", "Nombre Completo", "sexo", "Edad", "telefono", "condicion_salud"]
+                                st.dataframe(df_cargas_show[cols_cargas].rename(columns={
+                                    "cedula": "Cédula",
+                                    "sexo": "Sexo",
+                                    "telefono": "Teléfono",
+                                    "condicion_salud": "Salud"
+                                }), use_container_width=True, hide_index=True)
+                            else:
+                                st.info("ℹ️ No hay personas o cargas familiares registradas bajo este Jefe de Hogar.")
 
                         st.markdown("---")
                         
@@ -706,7 +719,6 @@ if "📊 Consultar y Filtros" in pestañas:
                                         format="DD/MM/YYYY"
                                     )
                                 
-                                # Edición de Núcleo Familiar[cite: 5]
                                 e_es_jefe = st.checkbox("¿Es Jefe de Hogar?", value=bool(hab['es_jefe_hogar']))
                                 e_jefe_ced = ""
                                 if not e_es_jefe:
@@ -802,7 +814,7 @@ if "📜 Bitácora de Documentos" in pestañas:
             st.info("Registre habitantes para utilizar el módulo de bitácora.")
 
 # -----------------------------------------------------------------------------
-# TAB: REGISTRAR HABITANTE (CON VÍNCULO DINÁMICO DE FAMILIA)
+# TAB: REGISTRAR HABITANTE
 # -----------------------------------------------------------------------------
 if "📝 Registrar Habitante" in pestañas:
     with tabs[pestañas.index("📝 Registrar Habitante")]:
@@ -831,11 +843,10 @@ if "📝 Registrar Habitante" in pestañas:
 
             st.markdown("---")
 
-            # VÍNCULO DINÁMICO DE FAMILIA[cite: 5]
             st.markdown("### 👨‍👩‍👧‍👦 Núcleo Familiar")
             col_f1, col_f2 = st.columns(2)
             with col_f1:
-                es_jefe = st.checkbox("¿Es el Jefe de Hogar?", value=False, help="Marque si esta persona encabeza la familia[cite: 5]")
+                es_jefe = st.checkbox("¿Es el Jefe de Hogar?", value=False, help="Marque si esta persona encabeza la familia")
             
             jefe_seleccionado_cedula = ""
             with col_f2:
@@ -847,7 +858,7 @@ if "📝 Registrar Habitante" in pestañas:
                             "Seleccionar Jefe de Hogar vinculado:",
                             options=[op[0] for op in opciones_jefes],
                             format_func=lambda code: dict(opciones_jefes).get(code, code),
-                            help="Busca en la base de datos a las personas marcadas como Jefe de hogar[cite: 5]"
+                            help="Busca en la base de datos a las personas marcadas como Jefe de hogar"
                         )
                         jefe_seleccionado_cedula = sel_jefe
                     else:
@@ -881,7 +892,6 @@ if "📝 Registrar Habitante" in pestañas:
 
             st.markdown("---")
 
-            # CAMPOS PERSONALIZADOS DINÁMICOS
             campos_config = cargar_campos_personalizados()
             if campos_config:
                 st.markdown("### ➕ Campos Personalizados Agregados")
@@ -917,7 +927,7 @@ if "📝 Registrar Habitante" in pestañas:
                 st.error("⚠️ Ingrese los campos obligatorios.")
 
 # -----------------------------------------------------------------------------
-# TAB: ESTADÍSTICAS
+# TAB: ESTADÍSTICAS (SECCIÓN DE JEFES DE FAMILIA REGISTRADOS)
 # -----------------------------------------------------------------------------
 if "📈 Estadísticas" in pestañas:
     with tabs[pestañas.index("📈 Estadísticas")]:
@@ -926,6 +936,43 @@ if "📈 Estadísticas" in pestañas:
         
         if not df_stat.empty:
             df_stat["edad"] = df_stat["fecha_nac"].apply(calcular_edad)
+            
+            # MODIFICACIÓN 2: SECCIÓN DE ESTADÍSTICAS DE JEFES DE FAMILIA REGISTRADOS
+            st.markdown("### 👑 Jefes de Familia Registrados")
+            df_jefes = df_stat[df_stat["es_jefe_hogar"] == 1].copy()
+            total_jefes = len(df_jefes)
+            
+            if total_jefes > 0:
+                # Conteo de integrantes vinculados por cada Jefe
+                conteo_cargas = df_stat[df_stat["jefe_hogar_cedula"] != ""].groupby("jefe_hogar_cedula").size().to_dict()
+                df_jefes["cargas_count"] = df_jefes["cedula"].map(conteo_cargas).fillna(0).astype(int)
+                
+                k_jefe1, k_jefe2, k_jefe3 = st.columns(3)
+                k_jefe1.metric("Total Jefes de Hogar", total_jefes)
+                k_jefe2.metric("Total Cargas / Familiares Vinculados", df_jefes["cargas_count"].sum())
+                k_jefe3.metric("Promedio Integrantes por Hogar", f"{((df_jefes['cargas_count'].sum() + total_jefes) / total_jefes):.1f}")
+                
+                st.markdown("##### 📋 Listado Detallado de Jefes de Hogar")
+                df_jefes_tabla = df_jefes.copy()
+                df_jefes_tabla["Nombre Completo"] = df_jefes_tabla["nombres"] + " " + df_jefes_tabla["apellidos"]
+                df_jefes_tabla["Edad"] = df_jefes_tabla["edad"]
+                
+                cols_jefes_show = ["cedula", "Nombre Completo", "sexo", "Edad", "manzana", "telefono", "cargas_count"]
+                st.dataframe(
+                    df_jefes_tabla[cols_jefes_show].rename(columns={
+                        "cedula": "Cédula",
+                        "sexo": "Sexo",
+                        "manzana": "Manzana",
+                        "telefono": "Teléfono",
+                        "cargas_count": "Familiares a Cargo"
+                    }), 
+                    use_container_width=True, 
+                    hide_index=True
+                )
+            else:
+                st.warning("⚠️ No se encuentran Jefes de Familia registrados actualmente en el sistema.")
+                
+            st.markdown("---")
             
             def clasificar_rango_edad(edad):
                 if edad <= 12: return "0 a 12 años"
@@ -936,7 +983,7 @@ if "📈 Estadísticas" in pestañas:
             
             df_stat["rango_etario"] = df_stat["edad"].apply(clasificar_rango_edad)
             
-            st.markdown("##### 🔍 Filtrar Estadísticas por Sexo")
+            st.markdown("##### 🔍 Filtrar Estadísticas Demográficas por Sexo")
             opciones_sexo = ["Todos"] + list(df_stat["sexo"].unique())
             sexo_filtro = st.selectbox("Seleccione para filtrar las métricas:", opciones_sexo)
             
@@ -1006,13 +1053,12 @@ if "📈 Estadísticas" in pestañas:
             st.info("📊 No hay datos suficientes para generar estadísticas.")
 
 # -----------------------------------------------------------------------------
-# TAB: PERSONALIZAR FORMULARIO Y GESTIONAR CAMPOS PERSONALIZADOS
+# TAB: PERSONALIZAR FORMULARIO
 # -----------------------------------------------------------------------------
 if "✏️ Personalizar Formulario" in pestañas:
     with tabs[pestañas.index("✏️ Personalizar Formulario")]:
         st.subheader("✏️ Gestión Completa de Campos Personalizados y Etiquetas")
         
-        # --- AÑADIR NUEVO CAMPO PERSONALIZADO[cite: 5] ---
         st.markdown("### ➕ Añadir Nuevo Campo Personalizado")
         with st.form("form_crear_nuevo_campo"):
             col_nc1, col_nc2, col_nc3 = st.columns([2, 1.5, 3])
@@ -1036,7 +1082,6 @@ if "✏️ Personalizar Formulario" in pestañas:
 
         st.markdown("---")
 
-        # --- RENOMBRAR, CAMBIAR TIPO DE DATO O ELIMINAR CAMPOS EXISTENTES[cite: 5] ---
         st.markdown("### 🛠️ Gestionar, Renombrar y Editar Campos Personalizados")
         lista_campos_cust = cargar_campos_personalizados()
         
@@ -1066,19 +1111,18 @@ if "✏️ Personalizar Formulario" in pestañas:
                         if btn_upd:
                             lista_ops_updated = [x.strip() for x in e_ops_cust.split(",") if x.strip()]
                             actualizar_campo_personalizado(c_id, e_nom_cust.strip(), e_tipo_cust, lista_ops_updated)
-                            st.success(f"✅ Campo '{c_nom}' actualizado a '{e_nom_cust.strip()}'. Estructura guardada actualizada[cite: 5].")
+                            st.success(f"✅ Campo '{c_nom}' actualizado a '{e_nom_cust.strip()}'. Estructura guardada actualizada.")
                             st.rerun()
 
                         if btn_del:
                             eliminar_campo_personalizado(c_id)
-                            st.warning(f"Campo '{c_nom}' eliminado y limpiado de la base de datos[cite: 5].")
+                            st.warning(f"Campo '{c_nom}' eliminado y limpiado de la base de datos.")
                             st.rerun()
         else:
             st.info("No hay campos personalizados adicionales creados.")
 
         st.markdown("---")
 
-        # --- CONFIGURAR CAMPOS BASE ---
         st.markdown("### ⚙️ Configurar Etiquetas de Campos Base Predeterminados")
         with st.form("form_config_campos_avanzado"):
             for clave, (etiqueta_def, tipo_def, opciones_def) in CAMPOS_BASE_DEFAULT.items():
