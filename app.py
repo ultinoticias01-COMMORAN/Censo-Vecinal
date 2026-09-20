@@ -82,7 +82,7 @@ def init_db():
             )
         """)
         
-        # Migración de columna permisos
+        # Migración de columna permisos si no existe
         cursor.execute("PRAGMA table_info(usuarios)")
         cols_usuarios = [column[1] for column in cursor.fetchall()]
         if "permisos" not in cols_usuarios:
@@ -93,6 +93,27 @@ def init_db():
             cursor.execute("UPDATE usuarios SET permisos = ? WHERE username = 'master'", (perm_master,))
             cursor.execute("UPDATE usuarios SET permisos = ? WHERE username = 'admin'", (perm_admin,))
             cursor.execute("UPDATE usuarios SET permisos = ? WHERE username = 'user'", (perm_user,))
+
+        # ---------------------------------------------------------------------
+        # MIGRACIÓN AUTOMÁTICA DE CONTRASEÑAS A SHA-256 (Conserva tus registros)
+        # ---------------------------------------------------------------------
+        cursor.execute("SELECT username, password FROM usuarios")
+        usuarios_existentes = cursor.fetchall()
+        
+        if not usuarios_existentes:
+            permisos_master = json.dumps({p: True for p in LISTA_PERMISOS})
+            permisos_admin = json.dumps({p: True for p in LISTA_PERMISOS if p != "personalizar_etiquetas"})
+            permisos_user = json.dumps({"ver_censo": True, "ver_estadisticas": True})
+            
+            cursor.execute("INSERT INTO usuarios VALUES (?, ?, ?, ?, ?)", ("master", hash_password("master123"), "Usuario Master", "Master", permisos_master))
+            cursor.execute("INSERT INTO usuarios VALUES (?, ?, ?, ?, ?)", ("admin", hash_password("admin123"), "Administrador Principal", "Administrador", permisos_admin))
+            cursor.execute("INSERT INTO usuarios VALUES (?, ?, ?, ?, ?)", ("user", hash_password("user123"), "Visualizador Invitado", "Visualizador", permisos_user))
+        else:
+            for user, pwd in usuarios_existentes:
+                # Si la contraseña no está encriptada con SHA-256 (las de SHA-256 miden 64 caracteres)
+                if len(pwd) != 64:
+                    pwd_encriptada = hash_password(pwd)
+                    cursor.execute("UPDATE usuarios SET password = ? WHERE username = ?", (pwd_encriptada, user))
 
         # Tabla Estilos y Campos Base
         cursor.execute("""
@@ -142,17 +163,6 @@ def init_db():
         cols_campos = [column[1] for column in cursor.fetchall()]
         if "opciones_json" not in cols_campos:
             cursor.execute("ALTER TABLE configuracion_campos ADD COLUMN opciones_json TEXT DEFAULT '[]'")
-        
-        # Usuarios iniciales por defecto si no existe ninguno
-        cursor.execute("SELECT COUNT(*) FROM usuarios")
-        if cursor.fetchone()[0] == 0:
-            permisos_master = json.dumps({p: True for p in LISTA_PERMISOS})
-            permisos_admin = json.dumps({p: True for p in LISTA_PERMISOS if p != "personalizar_etiquetas"})
-            permisos_user = json.dumps({"ver_censo": True, "ver_estadisticas": True})
-            
-            cursor.execute("INSERT INTO usuarios VALUES (?, ?, ?, ?, ?)", ("master", hash_password("master123"), "Usuario Master", "Master", permisos_master))
-            cursor.execute("INSERT INTO usuarios VALUES (?, ?, ?, ?, ?)", ("admin", hash_password("admin123"), "Administrador Principal", "Administrador", permisos_admin))
-            cursor.execute("INSERT INTO usuarios VALUES (?, ?, ?, ?, ?)", ("user", hash_password("user123"), "Visualizador Invitado", "Visualizador", permisos_user))
         
         conn.commit()
 
