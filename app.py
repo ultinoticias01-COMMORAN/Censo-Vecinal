@@ -243,11 +243,15 @@ def cargar_habitantes():
     with get_connection() as conn:
         df = pd.read_sql_query("SELECT * FROM habitantes", conn)
     
+    if df.empty:
+        return df
+
+    df["cedula"] = df["cedula"].astype(str)
     df["sexo"] = df["sexo"].fillna("No especificado")
     df["condicion_salud"] = df["condicion_salud"].fillna("Ninguna")
     df["detalle_salud"] = df["detalle_salud"].fillna("")
     df["es_jefe_hogar"] = df["es_jefe_hogar"].fillna(0).astype(int)
-    df["jefe_hogar_cedula"] = df["jefe_hogar_cedula"].fillna("")
+    df["jefe_hogar_cedula"] = df["jefe_hogar_cedula"].fillna("").astype(str)
     df["campos_adicionales"] = df["campos_adicionales"].fillna("{}")
     return df
 
@@ -447,13 +451,15 @@ def renderizar_campo_dinamico(key_campo, cfg_dict, valor_previo="", key_suffix="
     tipo = cfg["tipo_control"]
     opciones = cfg["opciones"]
     
+    unique_key = f"{key_campo}_{key_suffix}"
+    
     if tipo == "desplegable" and opciones:
         index_sel = 0
         if str(valor_previo) in opciones:
             index_sel = opciones.index(str(valor_previo))
-        return st.selectbox(f"{etiqueta}:", opciones, index=index_sel, key=f"{key_campo}_{key_suffix}")
+        return st.selectbox(f"{etiqueta}:", opciones, index=index_sel, key=unique_key)
     else:
-        return st.text_input(f"{etiqueta}:", value=str(valor_previo), key=f"{key_campo}_{key_suffix}")
+        return st.text_input(f"{etiqueta}:", value=str(valor_previo), key=unique_key)
 
 # -----------------------------------------------------------------------------
 # 4. CONTROL DE SESIÓN Y LOGIN
@@ -556,7 +562,7 @@ if "📊 Consultar y Filtros" in pestañas:
             
             with col_search2:
                 jefes_lista = obtener_jefes_hogar()
-                opciones_jefes = [("TODOS", "👨‍👩‍👧‍👦 -- Ver Todos los Grupos --")] + [(j[0], f"🏡 {j[1]} {j[2]} (C.I: {j[0]})") for j in jefes_lista]
+                opciones_jefes = [("TODOS", "👨‍👩‍👧‍👦 -- Ver Todos los Grupos --")] + [(str(j[0]), f"🏡 {j[1]} {j[2]} (C.I: {j[0]})") for j in jefes_lista]
                 
                 jefe_filtro_sel = st.selectbox(
                     "👨‍👩‍👧‍👦 Filtrar por Grupo Familiar (Jefe de Hogar):", [op[0] for op in opciones_jefes],
@@ -588,21 +594,24 @@ if "📊 Consultar y Filtros" in pestañas:
                         use_container_width=True
                     )
                 with col_dl2:
-                    buffer_excel = io.BytesIO()
-                    with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
-                        df_filtrado.to_excel(writer, index=False, sheet_name="Resultados")
-                    st.download_button(
-                        label="📊 Descargar Encontrados (Excel)",
-                        data=buffer_excel.getvalue(),
-                        file_name=f"censo_busqueda_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
+                    try:
+                        buffer_excel = io.BytesIO()
+                        with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
+                            df_filtrado.to_excel(writer, index=False, sheet_name="Resultados")
+                        st.download_button(
+                            label="📊 Descargar Encontrados (Excel)",
+                            data=buffer_excel.getvalue(),
+                            file_name=f"censo_busqueda_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True
+                        )
+                    except Exception:
+                        st.warning("Para exportar a Excel instala el módulo: `pip install openpyxl`")
                 st.markdown("---")
 
             if vista_modo == "Tarjetas Visuales":
                 for idx, hab in df_filtrado.iterrows():
-                    cedula_curr = hab["cedula"]
+                    cedula_curr = str(hab["cedula"])
                     nombre_completo = f"{hab['nombres']} {hab['apellidos']}"
                     es_jefe_flag = (hab['es_jefe_hogar'] == 1)
                     rol_familiar = "👑 JEFE DE HOGAR" if es_jefe_flag else "👨‍👩‍👧‍👦 Cargas / Familiar"
@@ -627,7 +636,7 @@ if "📊 Consultar y Filtros" in pestañas:
                             st.markdown("##### 📌 Datos Personales y Familiares")
                             st.write(f"**Condición Familiar:** {rol_familiar}")
                             if not es_jefe_flag and hab['jefe_hogar_cedula']:
-                                match_jefe = df[df["cedula"] == hab['jefe_hogar_cedula']]
+                                match_jefe = df[df["cedula"] == str(hab['jefe_hogar_cedula'])]
                                 if not match_jefe.empty:
                                     j_nom = f"{match_jefe.iloc[0]['nombres']} {match_jefe.iloc[0]['apellidos']}"
                                     st.write(f"**Vínculo con Jefe de Hogar:** {j_nom} (`{hab['jefe_hogar_cedula']}`)")
@@ -693,7 +702,7 @@ if "📊 Consultar y Filtros" in pestañas:
                             
                             col_ins1, col_ins2 = st.columns(2)
                             with col_ins1:
-                                e_ced = st.text_input("Cédula:", value=hab['cedula'], key=f"e_ced_{cedula_curr}")
+                                e_ced = st.text_input("Cédula:", value=str(hab['cedula']), key=f"e_ced_{cedula_curr}")
                                 e_nom = st.text_input("Nombres:", value=hab['nombres'], key=f"e_nom_{cedula_curr}")
                                 e_ape = st.text_input("Apellidos:", value=hab['apellidos'], key=f"e_ape_{cedula_curr}")
                                 e_tel = st.text_input("Teléfono:", value=hab['telefono'], key=f"e_tel_{cedula_curr}")
@@ -720,10 +729,10 @@ if "📊 Consultar y Filtros" in pestañas:
                             e_jefe_ced = ""
                             if not e_es_jefe:
                                 jefes_disp = obtener_jefes_hogar()
-                                ops_jefes_edit = [("", "-- Seleccionar Jefe de Hogar --")] + [(j[0], f"{j[1]} {j[2]} ({j[0]})") for j in jefes_disp if j[0] != cedula_curr]
+                                ops_jefes_edit = [("", "-- Seleccionar Jefe de Hogar --")] + [(str(j[0]), f"{j[1]} {j[2]} ({j[0]})") for j in jefes_disp if str(j[0]) != cedula_curr]
                                 idx_jefe = 0
                                 for i_j, o_j in enumerate(ops_jefes_edit):
-                                    if o_j[0] == hab['jefe_hogar_cedula']:
+                                    if o_j[0] == str(hab['jefe_hogar_cedula']):
                                         idx_jefe = i_j
                                         break
                                 sel_jefe_edit = st.selectbox("Vincular a Jefe de Hogar:", [o[0] for o in ops_jefes_edit], index=idx_jefe, format_func=lambda c: dict(ops_jefes_edit).get(c, c), key=f"e_jefe_sel_{cedula_curr}")
@@ -821,11 +830,11 @@ if "📝 Registrar Habitante" in pestañas:
         st.markdown("### 👤 Datos Personales e Identificación")
         col1, col2 = st.columns(2)
         with col1:
-            cedula = renderizar_campo_dinamico("cedula", cfg_campos, key_suffix="reg")
-            nombres = renderizar_campo_dinamico("nombres", cfg_campos, key_suffix="reg")
-            apellidos = renderizar_campo_dinamico("apellidos", cfg_campos, key_suffix="reg")
+            cedula = renderizar_campo_dinamico("cedula", cfg_campos, key_suffix="reg_input")
+            nombres = renderizar_campo_dinamico("nombres", cfg_campos, key_suffix="reg_input")
+            apellidos = renderizar_campo_dinamico("apellidos", cfg_campos, key_suffix="reg_input")
         with col2:
-            sexo = renderizar_campo_dinamico("sexo", cfg_campos, key_suffix="reg")
+            sexo = renderizar_campo_dinamico("sexo", cfg_campos, key_suffix="reg_input")
             lbl_fn = cfg_campos.get("fecha_nac", {}).get("etiqueta", "Fecha de Nacimiento")
             fecha_nac = st.date_input(
                 f"{lbl_fn} (DD/MM/YYYY)", 
@@ -835,7 +844,7 @@ if "📝 Registrar Habitante" in pestañas:
                 format="DD/MM/YYYY",
                 key="reg_fn_key"
             )
-            telefono = renderizar_campo_dinamico("telefono", cfg_campos, key_suffix="reg")
+            telefono = renderizar_campo_dinamico("telefono", cfg_campos, key_suffix="reg_input")
 
         st.markdown("---")
 
@@ -849,7 +858,7 @@ if "📝 Registrar Habitante" in pestañas:
             if not es_jefe:
                 jefes_existentes = obtener_jefes_hogar()
                 if jefes_existentes:
-                    opciones_jefes = [("", "-- Seleccionar Jefe de Hogar --")] + [(j[0], f"{j[1]} {j[2]} ({j[0]})") for j in jefes_existentes]
+                    opciones_jefes = [("", "-- Seleccionar Jefe de Hogar --")] + [(str(j[0]), f"{j[1]} {j[2]} ({j[0]})") for j in jefes_existentes]
                     sel_jefe = st.selectbox(
                         "Seleccionar Jefe de Hogar vinculado:",
                         options=[op[0] for op in opciones_jefes],
@@ -866,7 +875,7 @@ if "📝 Registrar Habitante" in pestañas:
         st.markdown("### 🏠 Ubicación y Vivienda")
         col3, col4 = st.columns(2)
         with col3:
-            manzana = renderizar_campo_dinamico("manzana", cfg_campos, key_suffix="reg")
+            manzana = renderizar_campo_dinamico("manzana", cfg_campos, key_suffix="reg_input")
             lbl_fl = cfg_campos.get("fecha_llegada", {}).get("etiqueta", "Fecha de Llegada")
             fecha_llegada = st.date_input(
                 f"{lbl_fl} (DD/MM/YYYY)", 
@@ -877,16 +886,16 @@ if "📝 Registrar Habitante" in pestañas:
                 key="reg_fl_key"
             )
         with col4:
-            direccion = renderizar_campo_dinamico("direccion", cfg_campos, key_suffix="reg")
+            direccion = renderizar_campo_dinamico("direccion", cfg_campos, key_suffix="reg_input")
 
         st.markdown("---")
 
         st.markdown("### ⚕️ Salud y Vulnerabilidad")
         col5, col6 = st.columns(2)
         with col5:
-            condicion_salud = renderizar_campo_dinamico("condicion_salud", cfg_campos, key_suffix="reg")
+            condicion_salud = renderizar_campo_dinamico("condicion_salud", cfg_campos, key_suffix="reg_input")
         with col6:
-            detalle_salud = renderizar_campo_dinamico("detalle_salud", cfg_campos, key_suffix="reg")
+            detalle_salud = renderizar_campo_dinamico("detalle_salud", cfg_campos, key_suffix="reg_input")
 
         st.markdown("---")
 
@@ -917,41 +926,10 @@ if "📝 Registrar Habitante" in pestañas:
                     fecha_nac.strftime("%Y-%m-%d"), fecha_llegada.strftime("%Y-%m-%d"),
                     str(direccion).strip(), str(manzana).strip(), str(telefono).strip(),
                     str(condicion_salud).strip(), str(detalle_salud).strip(),
-                    1 if es_jefe else 0, jefe_seleccionado_cedula, json_extra
+                    1 if es_jefe else 0, str(jefe_seleccionado_cedula).strip(), json_extra
                 )
                 guardar_habitante(datos)
-                
-                # --- LIMPIEZA DE CAMPOS EN SESSION STATE Y RESETEO ---
-                st.session_state["cedula_reg"] = ""
-                st.session_state["nombres_reg"] = ""
-                st.session_state["apellidos_reg"] = ""
-                st.session_state["telefono_reg"] = ""
-                st.session_state["manzana_reg"] = ""
-                st.session_state["direccion_reg"] = ""
-                st.session_state["detalle_salud_reg"] = ""
-                
-                if "sexo_reg" in st.session_state:
-                    st.session_state["sexo_reg"] = cfg_campos.get("sexo", {}).get("opciones", ["Femenino"])[0] if cfg_campos.get("sexo", {}).get("opciones") else "Femenino"
-                if "condicion_salud_reg" in st.session_state:
-                    st.session_state["condicion_salud_reg"] = cfg_campos.get("condicion_salud", {}).get("opciones", ["Ninguna"])[0] if cfg_campos.get("condicion_salud", {}).get("opciones") else "Ninguna"
-                
-                st.session_state["reg_fn_key"] = datetime(1990, 1, 1).date()
-                st.session_state["reg_fl_key"] = datetime(2010, 1, 1).date()
-                
-                st.session_state["reg_es_jefe_key"] = False
-                if "reg_sel_jefe_key" in st.session_state:
-                    st.session_state["reg_sel_jefe_key"] = ""
-                
-                if campos_config:
-                    for c_item in campos_config:
-                        key_c = f"reg_cust_{c_item['id']}"
-                        if key_c in st.session_state:
-                            if c_item["tipo"] == "Desplegable" and c_item["opciones"]:
-                                st.session_state[key_c] = c_item["opciones"][0]
-                            else:
-                                st.session_state[key_c] = ""
-                
-                st.toast(f"✅ ¡Registro de {nombres} {apellidos} guardado con éxito! Formulario vaciado.", icon="🎉")
+                st.toast(f"✅ ¡Registro de {nombres} {apellidos} guardado con éxito!", icon="🎉")
                 st.rerun()
             else:
                 st.error("⚠️ Ingrese los campos obligatorios (Cédula, Nombres y Apellidos).")
@@ -1259,10 +1237,13 @@ if "💾 Respaldos y Borrado" in pestañas:
                 csv_bytes = df_exp.to_csv(index=False, sep=";", encoding="utf-8-sig")
                 st.download_button("📥 Descargar Censo Completo (CSV)", csv_bytes, "censo_comunidad_completo.csv", "text/csv")
                 
-                buffer_exc = io.BytesIO()
-                with pd.ExcelWriter(buffer_exc, engine='openpyxl') as writer:
-                    df_exp.to_excel(writer, index=False, sheet_name="Censo")
-                st.download_button("📊 Descargar Censo Completo (Excel)", buffer_exc.getvalue(), "censo_comunidad_completo.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                try:
+                    buffer_exc = io.BytesIO()
+                    with pd.ExcelWriter(buffer_exc, engine='openpyxl') as writer:
+                        df_exp.to_excel(writer, index=False, sheet_name="Censo")
+                    st.download_button("📊 Descargar Censo Completo (Excel)", buffer_exc.getvalue(), "censo_comunidad_completo.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                except Exception:
+                    st.warning("Instala `openpyxl` para habilitar las descargas en formato Excel.")
 
         with col_res2:
             st.markdown("### 📥 Importar Archivos (CSV / Excel)")
@@ -1287,8 +1268,11 @@ if "💾 Respaldos y Borrado" in pestañas:
                         f_nac_imp = parsear_fecha_bd(row.get("fecha_nacimiento", row.get("fecha_nac", ""))).strftime("%Y-%m-%d")
                         f_lleg_imp = parsear_fecha_bd(row.get("fecha_llegada", "")).strftime("%Y-%m-%d")
 
+                        cedula_val = str(row.get("cedula", "")).split(".")[0].strip()
+                        jefe_ced_val = str(row.get("jefe_hogar_cedula", "")).split(".")[0].strip()
+
                         guardar_habitante((
-                            str(row.get("cedula", "")).strip(),
+                            cedula_val,
                             str(row.get("nombres", row.get("nombre", ""))).strip(),
                             str(row.get("apellidos", row.get("apellido", ""))).strip(),
                             str(row.get("sexo", "No especificado")).strip(),
@@ -1300,7 +1284,7 @@ if "💾 Respaldos y Borrado" in pestañas:
                             str(row.get("condicion_salud", "Ninguna")).strip(),
                             str(row.get("detalle_salud", "")).strip(),
                             int(row.get("es_jefe_hogar", 0)),
-                            str(row.get("jefe_hogar_cedula", "")).strip(),
+                            jefe_ced_val,
                             str(row.get("campos_adicionales", "{}")).strip()
                         ))
                     st.success("✅ Importación completada.")
