@@ -112,6 +112,7 @@ def init_db():
         )
     """)
     
+    # Creación garantizada de la tabla de campos personalizados
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS configuracion_campos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -289,10 +290,22 @@ def obtener_bitacora_habitante(cedula):
     conn.close()
     return df
 
-# --- CAMPOS ADICIONALES DINÁMICOS Y PERSONALIZADOS ---
+# --- CAMPOS ADICIONALES DINÁMICOS Y PERSONALIZADOS CON AUTO-REPARACIÓN ---
 def cargar_campos_personalizados():
     conn = get_connection()
     cursor = conn.cursor()
+    
+    # Verificación defensiva antes de ejecutar la consulta
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS configuracion_campos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre_campo TEXT UNIQUE,
+            tipo_campo TEXT,
+            opciones_json TEXT DEFAULT '[]'
+        )
+    """)
+    conn.commit()
+    
     cursor.execute("SELECT id, nombre_campo, tipo_campo, opciones_json FROM configuracion_campos")
     filas = cursor.fetchall()
     conn.close()
@@ -859,7 +872,7 @@ if "📈 Estadísticas" in pestañas:
             st.info("📊 No hay datos suficientes para generar estadísticas.")
 
 # -----------------------------------------------------------------------------
-# TAB: PERSONALIZAR FORMULARIO (NUEVOS CAMPOS Y DESPLEGABLES AQUÍ)
+# TAB: PERSONALIZAR FORMULARIO
 # -----------------------------------------------------------------------------
 if "✏️ Personalizar Formulario" in pestañas:
     with tabs[pestañas.index("✏️ Personalizar Formulario")]:
