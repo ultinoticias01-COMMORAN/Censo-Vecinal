@@ -1900,11 +1900,10 @@ if "📢 Bitácora Comunal y Oficios" in pestañas:
               + df_ev_show["hora_fin"]
           )
           df_ev_show["Estatus"] = df_ev_show["atendido"].apply(
-    lambda x: (
-        "✅ Solucionado" if x == 1 or x is True or str(x).lower() == "si"
-        else "⏳ Pendiente / En Curso"
-    )
-)
+              lambda x: (
+                  "✅ Solucionado" if x == 1 else "⏳ Pendiente / En Curso"
+              )
+          )
 
           cols_show_ev = [
               "id",
