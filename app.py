@@ -85,30 +85,7 @@ def init_db():
   with get_connection() as conn:
     cursor = conn.cursor()
 
-    cursor.execute("""
-            CREATE TABLE IF NOT EXISTS habitantes (
-                cedula TEXT PRIMARY KEY,
-                nombres TEXT,
-                apellidos TEXT,
-                sexo TEXT,
-                fecha_nac TEXT,
-                fecha_llegada TEXT,
-                direccion TEXT,
-                manzana TEXT,
-                telefono TEXT,
-                estado_civil TEXT DEFAULT 'Soltero/a',
-                conyuge_cedula TEXT DEFAULT '',
-                es_padre_madre INTEGER DEFAULT 0,
-                hijos_cedulas TEXT DEFAULT '[]',
-                pertenece_consejo INTEGER DEFAULT 0,
-                cargo_consejo TEXT DEFAULT 'Ninguno',
-                condicion_salud TEXT DEFAULT 'Ninguna',
-                detalle_salud TEXT DEFAULT '',
-                es_jefe_hogar INTEGER DEFAULT 0,
-                jefe_hogar_cedula TEXT DEFAULT '',
-                campos_adicionales TEXT DEFAULT '{}'
-            )
-        """)
+    cursor.execute(""" CREATE TABLE IF NOT EXISTS habitantes ( cedula TEXT PRIMARY KEY, nombres TEXT, apellidos TEXT, sexo TEXT, fecha_nac TEXT, fecha_llegada TEXT, direccion TEXT, manzana TEXT, telefono TEXT, estado_civil TEXT DEFAULT 'Soltero/a', conyuge_cedula TEXT DEFAULT '', es_padre_madre INTEGER DEFAULT 0, hijos_cedulas TEXT DEFAULT '[]', pertenece_consejo INTEGER DEFAULT 0, cargo_consejo TEXT DEFAULT 'Ninguno', condicion_salud TEXT DEFAULT 'Ninguna', detalle_salud TEXT DEFAULT '', es_jefe_hogar INTEGER DEFAULT 0, jefe_hogar_cedula TEXT DEFAULT '', campos_adicionales TEXT DEFAULT '{}' ) """)
 
     cursor.execute("PRAGMA table_info(habitantes)")
     cols_hab = [column[1] for column in cursor.fetchall()]
@@ -127,22 +104,11 @@ def init_db():
       if col_nom not in cols_hab:
         cursor.execute(f"ALTER TABLE habitantes ADD COLUMN {col_nom} {col_tipo}")
 
-    cursor.execute("""
-            CREATE TABLE IF NOT EXISTS config_comunidad (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nombre_comunidad TEXT,
-                nombre_consejo TEXT,
-                periodo TEXT,
-                vencimiento TEXT
-            )
-        """)
+    cursor.execute(""" CREATE TABLE IF NOT EXISTS config_comunidad ( id INTEGER PRIMARY KEY AUTOINCREMENT, nombre_comunidad TEXT, nombre_consejo TEXT, periodo TEXT, vencimiento TEXT ) """)
     cursor.execute("SELECT COUNT(*) FROM config_comunidad")
     if cursor.fetchone()[0] == 0:
       cursor.execute(
-          """
-                INSERT INTO config_comunidad (nombre_comunidad, nombre_consejo, periodo, vencimiento)
-                VALUES (?, ?, ?, ?)
-            """,
+          """ INSERT INTO config_comunidad (nombre_comunidad, nombre_consejo, periodo, vencimiento) VALUES (?, ?, ?, ?) """,
           (
               "Comunidad Turpialito",
               "Consejo Comunal Nuevo Horizonte",
@@ -151,15 +117,7 @@ def init_db():
           ),
       )
 
-    cursor.execute("""
-            CREATE TABLE IF NOT EXISTS usuarios (
-                username TEXT PRIMARY KEY,
-                password TEXT,
-                nombre_completo TEXT,
-                rol TEXT,
-                permisos TEXT DEFAULT '{}'
-            )
-        """)
+    cursor.execute(""" CREATE TABLE IF NOT EXISTS usuarios ( username TEXT PRIMARY KEY, password TEXT, nombre_completo TEXT, rol TEXT, permisos TEXT DEFAULT '{}' ) """)
 
     cursor.execute("PRAGMA table_info(usuarios)")
     cols_usuarios = [column[1] for column in cursor.fetchall()]
@@ -234,60 +192,19 @@ def init_db():
               (pwd_encriptada, user),
           )
 
-    cursor.execute("""
-            CREATE TABLE IF NOT EXISTS configuracion_estilo_campos (
-                clave_campo TEXT PRIMARY KEY,
-                etiqueta TEXT,
-                tipo_control TEXT,
-                opciones_json TEXT
-            )
-        """)
+    cursor.execute(""" CREATE TABLE IF NOT EXISTS configuracion_estilo_campos ( clave_campo TEXT PRIMARY KEY, etiqueta TEXT, tipo_control TEXT, opciones_json TEXT ) """)
 
     for clave, (etiqueta_def, tipo_def, opciones_def) in CAMPOS_BASE_DEFAULT.items():
       cursor.execute(
-          """
-                INSERT OR IGNORE INTO configuracion_estilo_campos (clave_campo, etiqueta, tipo_control, opciones_json)
-                VALUES (?, ?, ?, ?)
-            """,
+          """ INSERT OR IGNORE INTO configuracion_estilo_campos (clave_campo, etiqueta, tipo_control, opciones_json) VALUES (?, ?, ?, ?) """,
           (clave, etiqueta_def, tipo_def, opciones_def),
       )
 
-    cursor.execute("""
-            CREATE TABLE IF NOT EXISTS bitacora_documentos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cedula TEXT,
-                tipo_documento TEXT,
-                descripcion TEXT,
-                fecha_emision TEXT,
-                emitido_por TEXT
-            )
-        """)
+    cursor.execute(""" CREATE TABLE IF NOT EXISTS bitacora_documentos ( id INTEGER PRIMARY KEY AUTOINCREMENT, cedula TEXT, tipo_documento TEXT, descripcion TEXT, fecha_emision TEXT, emitido_por TEXT ) """)
 
-    cursor.execute("""
-            CREATE TABLE IF NOT EXISTS bitacora_oficios (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                fecha TEXT,
-                vocero_responsable TEXT,
-                titulo TEXT,
-                institucion_destino TEXT,
-                descripcion TEXT,
-                estatus TEXT
-            )
-        """)
+    cursor.execute(""" CREATE TABLE IF NOT EXISTS bitacora_oficios ( id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, vocero_responsable TEXT, titulo TEXT, institucion_destino TEXT, descripcion TEXT, estatus TEXT ) """)
 
-    cursor.execute("""
-            CREATE TABLE IF NOT EXISTS bitacora_eventualidades (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                fecha_inicio TEXT,
-                hora_inicio TEXT,
-                fecha_fin TEXT,
-                hora_fin TEXT,
-                tipo_evento TEXT,
-                sector_afectado TEXT,
-                detalles TEXT,
-                atendido INTEGER DEFAULT 0
-            )
-        """)
+    cursor.execute(""" CREATE TABLE IF NOT EXISTS bitacora_eventualidades ( id INTEGER PRIMARY KEY AUTOINCREMENT, fecha_inicio TEXT, hora_inicio TEXT, fecha_fin TEXT, hora_fin TEXT, tipo_evento TEXT, sector_afectado TEXT, detalles TEXT, atendido INTEGER DEFAULT 0 ) """)
 
     cursor.execute("PRAGMA table_info(bitacora_eventualidades)")
     cols_ev_db = [c[1] for c in cursor.fetchall()]
@@ -308,52 +225,20 @@ def init_db():
           "ALTER TABLE bitacora_eventualidades ADD COLUMN hora_fin TEXT"
       )
 
-    cursor.execute("""
-            CREATE TABLE IF NOT EXISTS vocerias_comite (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                comite TEXT,
-                nombre_vocero TEXT,
-                cedula_vocero TEXT,
-                telefono TEXT,
-                correo TEXT
-            )
-        """)
+    # Tabla para almacenar nombres de vocerías con Finanzas y Contraloría iniciales
+    cursor.execute(""" CREATE TABLE IF NOT EXISTS vocerias_comite ( id INTEGER PRIMARY KEY AUTOINCREMENT, comite TEXT UNIQUE ) """)
     cursor.execute("SELECT COUNT(*) FROM vocerias_comite")
     if cursor.fetchone()[0] == 0:
       vocerias_iniciales = [
-          ("Mesa Técnica de Agua", "Juan Pérez", "12345678", "0412-1111111", ""),
-          (
-              "Finanzas y Contraloría",
-              "María Rodríguez",
-              "87654321",
-              "0414-2222222",
-              "",
-          ),
-          ("Seguridad Ciudadana", "Carlos Gómez", "11223344", "0416-3333333", ""),
-          (
-              "Educación y Cultura",
-              "Ana Martínez",
-              "44332211",
-              "0424-4444444",
-              "",
-          ),
+          ("Unidad de Finanzas",),
+          ("Unidad de Contraloría",),
       ]
       cursor.executemany(
-          """
-                INSERT INTO vocerias_comite (comite, nombre_vocero, cedula_vocero, telefono, correo)
-                VALUES (?, ?, ?, ?, ?)
-            """,
+          """ INSERT OR IGNORE INTO vocerias_comite (comite) VALUES (?) """,
           vocerias_iniciales,
       )
 
-    cursor.execute("""
-            CREATE TABLE IF NOT EXISTS configuracion_campos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nombre_campo TEXT UNIQUE,
-                tipo_campo TEXT,
-                opciones_json TEXT DEFAULT '[]'
-            )
-        """)
+    cursor.execute(""" CREATE TABLE IF NOT EXISTS configuracion_campos ( id INTEGER PRIMARY KEY AUTOINCREMENT, nombre_campo TEXT UNIQUE, tipo_campo TEXT, opciones_json TEXT DEFAULT '[]' ) """)
 
     conn.commit()
 
@@ -394,10 +279,7 @@ def guardar_configuracion_comunidad(
     cursor = conn.cursor()
     cursor.execute("DELETE FROM config_comunidad")
     cursor.execute(
-        """
-            INSERT INTO config_comunidad (nombre_comunidad, nombre_consejo, periodo, vencimiento)
-            VALUES (?, ?, ?, ?)
-        """,
+        """ INSERT INTO config_comunidad (nombre_comunidad, nombre_consejo, periodo, vencimiento) VALUES (?, ?, ?, ?) """,
         (nombre_comunidad, nombre_consejo, periodo, vencimiento),
     )
     conn.commit()
@@ -522,15 +404,7 @@ def guardar_habitante(datos):
   with get_connection() as conn:
     cursor = conn.cursor()
     cursor.execute(
-        """
-            INSERT OR REPLACE INTO habitantes (
-                cedula, nombres, apellidos, sexo, fecha_nac, fecha_llegada, 
-                direccion, manzana, telefono, estado_civil, conyuge_cedula,
-                es_padre_madre, hijos_cedulas, pertenece_consejo, cargo_consejo,
-                condicion_salud, detalle_salud, es_jefe_hogar, jefe_hogar_cedula, 
-                campos_adicionales
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
+        """ INSERT OR REPLACE INTO habitantes ( cedula, nombres, apellidos, sexo, fecha_nac, fecha_llegada, direccion, manzana, telefono, estado_civil, conyuge_cedula, es_padre_madre, hijos_cedulas, pertenece_consejo, cargo_consejo, condicion_salud, detalle_salud, es_jefe_hogar, jefe_hogar_cedula, campos_adicionales ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) """,
         datos,
     )
     conn.commit()
@@ -561,15 +435,7 @@ def actualizar_habitante_completo(cedula_original, datos_nuevos):
       )
 
     cursor.execute(
-        """
-            INSERT OR REPLACE INTO habitantes (
-                cedula, nombres, apellidos, sexo, fecha_nac, fecha_llegada, 
-                direccion, manzana, telefono, estado_civil, conyuge_cedula,
-                es_padre_madre, hijos_cedulas, pertenece_consejo, cargo_consejo,
-                condicion_salud, detalle_salud, es_jefe_hogar, jefe_hogar_cedula, 
-                campos_adicionales
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
+        """ INSERT OR REPLACE INTO habitantes ( cedula, nombres, apellidos, sexo, fecha_nac, fecha_llegada, direccion, manzana, telefono, estado_civil, conyuge_cedula, es_padre_madre, hijos_cedulas, pertenece_consejo, cargo_consejo, condicion_salud, detalle_salud, es_jefe_hogar, jefe_hogar_cedula, campos_adicionales ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) """,
         datos_nuevos,
     )
     conn.commit()
@@ -611,10 +477,7 @@ def registrar_documento_bitacora(cedula, tipo_doc, descripcion, emitido_por):
     cursor = conn.cursor()
     fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     cursor.execute(
-        """
-            INSERT INTO bitacora_documentos (cedula, tipo_documento, descripcion, fecha_emision, emitido_por)
-            VALUES (?, ?, ?, ?, ?)
-        """,
+        """ INSERT INTO bitacora_documentos (cedula, tipo_documento, descripcion, fecha_emision, emitido_por) VALUES (?, ?, ?, ?, ?) """,
         (cedula, tipo_doc, descripcion, fecha_actual, emitido_por),
     )
     conn.commit()
@@ -637,10 +500,7 @@ def registrar_oficio_comunal(
   with get_connection() as conn:
     cursor = conn.cursor()
     cursor.execute(
-        """
-            INSERT INTO bitacora_oficios (fecha, vocero_responsable, titulo, institucion_destino, descripcion, estatus)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """,
+        """ INSERT INTO bitacora_oficios (fecha, vocero_responsable, titulo, institucion_destino, descripcion, estatus) VALUES (?, ?, ?, ?, ?, ?) """,
         (fecha, vocero, titulo, institucion, descripcion, estatus),
     )
     conn.commit()
@@ -663,33 +523,22 @@ def eliminar_oficio_comunal(id_oficio):
 def cargar_vocerias_comite():
   with get_connection() as conn:
     return pd.read_sql_query(
-        "SELECT id, comite, nombre_vocero, cedula_vocero, telefono, correo FROM"
-        " vocerias_comite ORDER BY id ASC",
-        conn,
+        "SELECT id, comite FROM vocerias_comite ORDER BY id ASC", conn
     )
 
 
-def guardar_voceria(
-    comite, nombre_vocero, cedula_vocero, telefono, correo, id_voceria=None
-):
+def guardar_voceria(nombre_comite, id_voceria=None):
   with get_connection() as conn:
     cursor = conn.cursor()
     if id_voceria:
       cursor.execute(
-          """
-                UPDATE vocerias_comite 
-                SET comite = ?, nombre_vocero = ?, cedula_vocero = ?, telefono = ?, correo = ?
-                WHERE id = ?
-            """,
-          (comite, nombre_vocero, cedula_vocero, telefono, correo, id_voceria),
+          """ UPDATE vocerias_comite SET comite = ? WHERE id = ? """,
+          (nombre_comite, id_voceria),
       )
     else:
       cursor.execute(
-          """
-                INSERT INTO vocerias_comite (comite, nombre_vocero, cedula_vocero, telefono, correo)
-                VALUES (?, ?, ?, ?, ?)
-            """,
-          (comite, nombre_vocero, cedula_vocero, telefono, correo),
+          """ INSERT OR IGNORE INTO vocerias_comite (comite) VALUES (?) """,
+          (nombre_comite,),
       )
     conn.commit()
 
@@ -716,12 +565,7 @@ def registrar_eventualidad_comunal(
     cursor = conn.cursor()
     if id_evento:
       cursor.execute(
-          """
-                UPDATE bitacora_eventualidades 
-                SET fecha_inicio = ?, hora_inicio = ?, fecha_fin = ?, hora_fin = ?, 
-                    tipo_evento = ?, sector_afectado = ?, detalles = ?, atendido = ?
-                WHERE id = ?
-            """,
+          """ UPDATE bitacora_eventualidades SET fecha_inicio = ?, hora_inicio = ?, fecha_fin = ?, hora_fin = ?, tipo_evento = ?, sector_afectado = ?, detalles = ?, atendido = ? WHERE id = ? """,
           (
               fecha_inicio,
               hora_inicio,
@@ -736,10 +580,7 @@ def registrar_eventualidad_comunal(
       )
     else:
       cursor.execute(
-          """
-                INSERT INTO bitacora_eventualidades (fecha_inicio, hora_inicio, fecha_fin, hora_fin, tipo_evento, sector_afectado, detalles, atendido)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
+          """ INSERT INTO bitacora_eventualidades (fecha_inicio, hora_inicio, fecha_fin, hora_fin, tipo_evento, sector_afectado, detalles, atendido) VALUES (?, ?, ?, ?, ?, ?, ?, ?) """,
           (
               fecha_inicio,
               hora_inicio,
@@ -1187,7 +1028,7 @@ if "📊 Consultar y Filtros" in pestañas:
 
               if hab["pertenece_consejo"] == 1:
                 st.write(
-                    "**Consejo Comunal:** ✅ Sí participa | **Cargo:**"
+                    "**Consejo Comunal:** ✅ Sí participa | **Vocería / Comité:**"
                     f" `{hab['cargo_consejo']}`"
                 )
               else:
@@ -1403,24 +1244,19 @@ if "📊 Consultar y Filtros" in pestañas:
               )
               e_cargo_cc = "Ninguno"
               if e_pert_cc:
-                cargos_cc_lista = [
-                    "Vocero de Mesa Técnica de Agua",
-                    "Vocero de Finanzas",
-                    "Vocero de Seguridad",
-                    "Vocero de Educación y Cultura",
-                    "Vocero de Alimentación",
-                    "Vocero de Salud",
-                    "Vocero de Hábitat y Vivienda",
-                    "Vocero Principal",
-                    "Otro Vocero / Comité",
-                ]
+                df_vocs_db = cargar_vocerias_comite()
+                cargos_cc_lista = (
+                    df_vocs_db["comite"].tolist()
+                    if not df_vocs_db.empty
+                    else ["Unidad de Finanzas"]
+                )
                 idx_c = (
                     cargos_cc_lista.index(hab["cargo_consejo"])
                     if hab["cargo_consejo"] in cargos_cc_lista
                     else 0
                 )
                 e_cargo_cc = st.selectbox(
-                    "Cargo / Comité en Consejo Comunal:",
+                    "Vocería / Comité en Consejo Comunal:",
                     cargos_cc_lista,
                     index=idx_c,
                     key=f"e_cargo_{cedula_curr}",
@@ -1537,7 +1373,7 @@ if "📊 Consultar y Filtros" in pestañas:
             df_tabla[cols_mostrar].rename(
                 columns={
                     "estado_civil": "Estado Civil",
-                    "cargo_consejo": "Cargo Consejo Comunal",
+                    "cargo_consejo": "Vocería / Comité",
                 }
             ),
             use_container_width=True,
@@ -1633,13 +1469,12 @@ if "📜 Bitácora de Documentos" in pestañas:
 if "📢 Bitácora Comunal y Oficios" in pestañas:
   with tabs[pestañas.index("📢 Bitácora Comunal y Oficios")]:
     st.subheader(
-        "📢 Bitácora Comunal: Oficios Institucionales, Vocerías y Eventualidades"
+        "📢 Bitácora Comunal: Oficios Institucionales y Eventualidades"
     )
 
-    sub_tab1, sub_tab2, sub_tab3 = st.tabs([
+    sub_tab1, sub_tab2 = st.tabs([
         "📋 Oficios y Trámites",
         "⚠️ Eventualidades y Servicios Públicos",
-        "👥 Gestión de Vocerías y Comités",
     ])
 
     with sub_tab1:
@@ -1935,126 +1770,6 @@ if "📢 Bitácora Comunal y Oficios" in pestañas:
         else:
           st.info("No hay eventualidades registradas en el sistema.")
 
-    with sub_tab3:
-      st.markdown("### 👥 Gestión y Edición de Vocerías y Comités")
-      col_v1, col_v2 = st.columns([1, 1.5])
-
-      with col_v1:
-        st.markdown("##### ✍️ Agregar o Editar Vocero/Comité")
-        accion_voc = st.radio(
-            "Acción Vocería:", ["Agregar Nuevo", "Editar Existente"], horizontal=True, key="r_voc"
-        )
-        id_voc_edit = None
-
-        if accion_voc == "Editar Existente":
-          df_voc_all = cargar_vocerias_comite()
-          if not df_voc_all.empty:
-            sel_v_id = st.selectbox(
-                "Seleccione Vocería a Editar:",
-                df_voc_all["id"].tolist(),
-                format_func=lambda i: f"{df_voc_all[df_voc_all['id'] == i]['comite'].values[0]} - {df_voc_all[df_voc_all['id'] == i]['nombre_vocero'].values[0]}",
-            )
-            row_v_sel = df_voc_all[df_voc_all["id"] == sel_v_id].iloc[0]
-            id_voc_edit = row_v_sel["id"]
-
-            v_comite_val = row_v_sel["comite"]
-            v_nom_val = row_v_sel["nombre_vocero"]
-            v_ci_val = row_v_sel["cedula_vocero"]
-            v_tel_val = row_v_sel["telefono"]
-            v_mail_val = row_v_sel["correo"]
-          else:
-            st.info("No hay vocerías registradas.")
-            v_comite_val, v_nom_val, v_ci_val, v_tel_val, v_mail_val = (
-                "",
-                "",
-                "",
-                "",
-                "",
-            )
-        else:
-          v_comite_val, v_nom_val, v_ci_val, v_tel_val, v_mail_val = (
-              "",
-              "",
-              "",
-              "",
-              "",
-          )
-
-        comite_inp = st.text_input(
-            "Nombre del Comité:",
-            value=v_comite_val,
-            placeholder="Ej: Mesa Técnica de Agua, Salud, Finanzas...",
-        )
-        vocero_inp = st.text_input(
-            "Nombre y Apellido del Vocero:",
-            value=v_nom_val,
-            placeholder="Nombre completo...",
-        )
-        ci_voc_inp = st.text_input(
-            "Cédula del Vocero:",
-            value=v_ci_val,
-            placeholder="Cédula de identidad...",
-        )
-        tel_voc_inp = st.text_input(
-            "Teléfono de Contacto:",
-            value=v_tel_val,
-            placeholder="Ej: 0412-1234567",
-        )
-        correo_voc_inp = st.text_input(
-            "Correo Electrónico (Opcional):",
-            value=v_mail_val,
-            placeholder="correo@gmail.com",
-        )
-
-        btn_voc_lbl = (
-            "💾 Actualizar Vocería"
-            if accion_voc == "Editar Existente"
-            else "💾 Guardar Nueva Vocería"
-        )
-        if st.button(btn_voc_lbl, type="primary", use_container_width=True):
-          if comite_inp.strip() and vocero_inp.strip():
-            guardar_voceria(
-                comite_inp.strip(),
-                vocero_inp.strip(),
-                ci_voc_inp.strip(),
-                tel_voc_inp.strip(),
-                correo_voc_inp.strip(),
-                id_voceria=id_voc_edit,
-            )
-            st.success("✅ Vocería guardada con éxito.")
-            st.rerun()
-          else:
-            st.error("Complete al menos el comité y el nombre del vocero.")
-
-      with col_v2:
-        st.markdown("##### 📑 Listado de Vocerías del Consejo Comunal")
-        df_voc_list = cargar_vocerias_comite()
-        if not df_voc_list.empty:
-          st.dataframe(
-              df_voc_list.rename(
-                  columns={
-                      "id": "ID",
-                      "comite": "Comité",
-                      "nombre_vocero": "Vocero",
-                      "cedula_vocero": "Cédula",
-                      "telefono": "Teléfono",
-                  }
-              ),
-              use_container_width=True,
-              hide_index=True,
-          )
-
-          id_del_voc = st.number_input(
-              "ID de Vocería a eliminar:", min_value=0, step=1, key="del_voc_id"
-          )
-          if st.button("🗑️ Eliminar Vocería Seleccionada"):
-            if id_del_voc > 0:
-              eliminar_voceria(int(id_del_voc))
-              st.warning("Vocería eliminada.")
-              st.rerun()
-        else:
-          st.info("No hay vocerías registradas.")
-
 # -----------------------------------------------------------------------------
 # TAB: REGISTRAR HABITANTE
 # -----------------------------------------------------------------------------
@@ -2180,19 +1895,14 @@ if "📝 Registrar Habitante" in pestañas:
     with col_cc2:
       cargo_consejo = "Ninguno"
       if pertenece_consejo:
-        lista_cargos_cc = [
-            "Vocero de Mesa Técnica de Agua",
-            "Vocero de Finanzas",
-            "Vocero de Seguridad",
-            "Vocero de Educación y Cultura",
-            "Vocero de Alimentación",
-            "Vocero de Salud",
-            "Vocero de Hábitat y Vivienda",
-            "Vocero Principal",
-            "Otro Vocero / Comité",
-        ]
+        df_voc_db = cargar_vocerias_comite()
+        lista_cargos_cc = (
+            df_voc_db["comite"].tolist()
+            if not df_voc_db.empty
+            else ["Unidad de Finanzas"]
+        )
         cargo_consejo = st.selectbox(
-            "Seleccione Cargo / Comité:", lista_cargos_cc, key="reg_cargo_cc_sel"
+            "Seleccione Vocería / Comité:", lista_cargos_cc, key="reg_cargo_cc_sel"
         )
 
     st.markdown("---")
@@ -2302,27 +2012,70 @@ if "📝 Registrar Habitante" in pestañas:
 # -----------------------------------------------------------------------------
 if "📈 Estadísticas" in pestañas:
   with tabs[pestañas.index("📈 Estadísticas")]:
-    st.subheader("📈 Resumen Estadístico, Demográfico y de Eventualidades")
+    st.subheader("📈 Resumen Estadístico e Indicadores Demográficos")
     df_stat = cargar_habitantes()
 
     if not df_stat.empty:
-      st.markdown("### 👑 Jefes de Familia y Consejo Comunal")
+      st.markdown("### 👑 Jefes de Familia Registrados")
       df_jefes = df_stat[df_stat["es_jefe_hogar"] == 1].copy()
       total_jefes = len(df_jefes)
-      total_consejo = len(df_stat[df_stat["pertenece_consejo"] == 1])
 
-      k_jefe1, k_jefe2, k_jefe3, k_jefe4 = st.columns(4)
-      k_jefe1.metric("Total Jefes de Hogar", total_jefes)
-      k_jefe2.metric("Voceros / Consejo Comunal", total_consejo)
-      k_jefe3.metric(
-          "Total Habitantes Censados", len(df_stat)
-      )
-      k_jefe4.metric(
-          "Promedio Integrantes por Hogar",
-          f"{((len(df_stat) - total_jefes) / total_jefes):.1f}"
-          if total_jefes > 0
-          else "0",
-      )
+      if total_jefes > 0:
+        conteo_cargas = (
+            df_stat[df_stat["jefe_hogar_cedula"] != ""]
+            .groupby("jefe_hogar_cedula")
+            .size()
+            .to_dict()
+        )
+        df_jefes["cargas_count"] = (
+            df_jefes["cedula"].map(conteo_cargas).fillna(0).astype(int)
+        )
+
+        k_jefe1, k_jefe2, k_jefe3 = st.columns(3)
+        k_jefe1.metric("Total Jefes de Hogar", total_jefes)
+        k_jefe2.metric(
+            "Total Cargas / Familiares Vinculados",
+            df_jefes["cargas_count"].sum(),
+        )
+        k_jefe3.metric(
+            "Promedio Integrantes por Hogar",
+            f"{((df_jefes['cargas_count'].sum() + total_jefes) / total_jefes):.1f}",
+        )
+
+        st.markdown("##### 📋 Listado Detallado de Jefes de Hogar")
+        df_jefes_tabla = df_jefes.copy()
+        df_jefes_tabla["Nombre Completo"] = (
+            df_jefes_tabla["nombres"] + " " + df_jefes_tabla["apellidos"]
+        )
+        df_jefes_tabla["Edad"] = df_jefes_tabla["edad_num"]
+
+        cols_jefes_show = [
+            "cedula",
+            "Nombre Completo",
+            "sexo",
+            "Edad",
+            "manzana",
+            "telefono",
+            "cargas_count",
+        ]
+        st.dataframe(
+            df_jefes_tabla[cols_jefes_show].rename(
+                columns={
+                    "cedula": "Cédula",
+                    "sexo": "Sexo",
+                    "manzana": "Manzana",
+                    "telefono": "Teléfono",
+                    "cargas_count": "Familiares a Cargo",
+                }
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+      else:
+        st.warning(
+            "⚠️ No se encuentran Jefes de Familia registrados actualmente en el"
+            " sistema."
+        )
 
       st.markdown("---")
 
@@ -2340,7 +2093,28 @@ if "📈 Estadísticas" in pestañas:
 
       df_stat["rango_etario"] = df_stat["edad_num"].apply(clasificar_rango_edad)
 
+      st.markdown("##### 🔍 Filtrar Estadísticas Demográficas por Sexo")
+      opciones_sexo = ["Todos"] + list(df_stat["sexo"].unique())
+      sexo_filtro = st.selectbox("Seleccione para filtrar las métricas:", opciones_sexo)
+
+      if sexo_filtro != "Todos":
+        df_stat_calc = df_stat[df_stat["sexo"] == sexo_filtro]
+      else:
+        df_stat_calc = df_stat.copy()
+
+      st.markdown("---")
+
+      kpi_e1, kpi_e2, kpi_e3, kpi_e4, kpi_e5 = st.columns(5)
+      kpi_e1.metric("Población Seleccionada", len(df_stat_calc))
+      kpi_e2.metric("Niños (0 a 12 años)", len(df_stat_calc[df_stat_calc["edad_num"] <= 12]))
+      kpi_e3.metric("15 años o más", len(df_stat_calc[df_stat_calc["edad_num"] >= 15]))
+      kpi_e4.metric("Mayores de 18 años", len(df_stat_calc[df_stat_calc["edad_num"] >= 18]))
+      kpi_e5.metric("Mayores de 60 años", len(df_stat_calc[df_stat_calc["edad_num"] >= 60]))
+
+      st.markdown("---")
+
       col_g1, col_g2 = st.columns(2)
+
       with col_g1:
         st.markdown("##### 📊 Rangos de Edad Distribuidos por Sexo")
         df_edad_sexo = (
@@ -2355,104 +2129,72 @@ if "📈 Estadísticas" in pestañas:
             color="sexo",
             barmode="group",
             title="Comparativa de Edades por Sexo",
+            color_discrete_sequence=px.colors.qualitative.Set2,
             text="Cantidad",
         )
         fig_edad_sexo.update_traces(textposition="outside")
         st.plotly_chart(fig_edad_sexo, use_container_width=True)
 
+        st.markdown("##### 👥 Distribución Total por Sexo / Género")
+        fig_sexo = px.pie(
+            df_stat,
+            names="sexo",
+            hole=0.4,
+            color_discrete_sequence=px.colors.qualitative.Pastel,
+        )
+        st.plotly_chart(fig_sexo, use_container_width=True)
+
       with col_g2:
-        st.markdown("##### 🛡️ Participación en Consejo Comunal por Cargo")
-        df_cc_stat = (
-            df_stat[df_stat["pertenece_consejo"] == 1]
-            .groupby("cargo_consejo")
+        st.markdown("##### 🏘️ Habitantes por Manzana y Sexo")
+        df_manzana_sexo = (
+            df_stat.groupby(["manzana", "sexo"])
             .size()
-            .reset_index(name="Voceros")
+            .reset_index(name="Habitantes")
         )
-        if not df_cc_stat.empty:
-          fig_cc = px.pie(
-              df_cc_stat,
-              names="cargo_consejo",
-              values="Voceros",
-              hole=0.4,
-              title="Distribución de Cargos en Consejo Comunal",
-          )
-          st.plotly_chart(fig_cc, use_container_width=True)
-        else:
-          st.info("No hay voceros registrados en el consejo comunal.")
-
-    st.markdown("---")
-    st.markdown("### ⚡ Estadísticas de Eventualidades y Servicios Públicos")
-    df_ev_stat = cargar_eventualidades_comunales()
-
-    if not df_ev_stat.empty:
-      col_es1, col_es2 = st.columns(2)
-
-      with col_es1:
-        st.markdown("##### 📊 Eventos Registrados por Tipo y Estatus")
-        df_ev_stat["Estatus Atendido"] = df_ev_stat["atendido"].apply(
-            lambda x: "Atendido / Solucionado" if x == 1 else "Pendiente / En Curso"
-        )
-        fig_ev_tipo = px.histogram(
-            df_ev_stat,
-            x="tipo_evento",
-            color="Estatus Atendido",
+        fig_manz_sexo = px.bar(
+            df_manzana_sexo,
+            x="manzana",
+            y="Habitantes",
+            color="sexo",
             barmode="group",
-            title="Incidencias por Tipo y Estado",
+            title="Habitantes por Manzana desglosados por Sexo",
+            color_discrete_sequence=px.colors.qualitative.Safe,
+            text="Habitantes",
         )
-        st.plotly_chart(fig_ev_tipo, use_container_width=True)
+        fig_manz_sexo.update_traces(textposition="outside")
+        st.plotly_chart(fig_manz_sexo, use_container_width=True)
 
-      with col_es2:
-        st.markdown("##### ⏱️ Análisis de Duración de Fallas y Soluciones")
-        duraciones = []
-        for _, row in df_ev_stat.iterrows():
-          try:
-            f_i = pd.to_datetime(
-                f"{row['fecha_inicio']} {row['hora_inicio']}", errors="coerce"
-            )
-            f_f = pd.to_datetime(
-                f"{row['fecha_fin']} {row['hora_fin']}", errors="coerce"
-            )
-            if pd.notnull(f_i) and pd.notnull(f_f):
-              diff_horas = (f_f - f_i).total_seconds() / 3600.0
-              if diff_horas >= 0:
-                duraciones.append({
-                    "Tipo": row["tipo_evento"],
-                    "Sector": row["sector_afectado"],
-                    "Horas": diff_horas,
-                    "Estatus": (
-                        "Solucionado"
-                        if row["atendido"] == 1
-                        else "Pendiente"
-                    ),
-                })
-          except Exception:
-            pass
-
-        if duraciones:
-          df_dur = pd.DataFrame(duraciones)
-          fig_dur = px.box(
-              df_dur,
-              x="Tipo",
-              y="Horas",
-              color="Estatus",
-              title="Distribución de Duración de Fallas (en Horas)",
+        st.markdown("##### ⚕️ Condición de Salud por Sexo")
+        df_salud_sexo = (
+            df_stat[df_stat["condicion_salud"] != "Ninguna"]
+            .groupby(["condicion_salud", "sexo"])
+            .size()
+            .reset_index(name="Casos")
+        )
+        if not df_salud_sexo.empty:
+          fig_salud_sex = px.bar(
+              df_salud_sexo,
+              x="condicion_salud",
+              y="Casos",
+              color="sexo",
+              barmode="group",
+              title="Afectaciones de Salud por Sexo",
+              text="Casos",
           )
-          st.plotly_chart(fig_dur, use_container_width=True)
+          fig_salud_sex.update_traces(textposition="outside")
+          st.plotly_chart(fig_salud_sex, use_container_width=True)
         else:
-          st.info(
-              "No hay suficientes registros con horarios estructurados para"
-              " calcular duraciones."
-          )
+          st.info("No hay condiciones de salud especiales registradas.")
     else:
-      st.info("No hay eventualidades registradas para mostrar estadísticas.")
+      st.info("📊 No hay datos suficientes para generar estadísticas.")
 
 # -----------------------------------------------------------------------------
-# TAB: CONFIGURAR COMUNIDAD & FORMULARIO
+# TAB: CONFIGURAR COMUNIDAD & FORMULARIO (GESTIÓN EXCLUSIVA DE VOCERÍAS)
 # -----------------------------------------------------------------------------
 if "✏️ Configurar Comunidad & Formulario" in pestañas:
   with tabs[pestañas.index("✏️ Configurar Comunidad & Formulario")]:
     st.subheader(
-        "⚙️ Configuración General de la Comunidad y Campos Personalizados"
+        "⚙️ Configuración General de la Comunidad y Catálogo de Vocerías"
     )
 
     st.markdown("### 🏘️ Datos del Consejo Comunal y Período")
@@ -2461,21 +2203,25 @@ if "✏️ Configurar Comunidad & Formulario" in pestañas:
       input_nom_comunidad = st.text_input(
           "Nombre de la Comunidad:",
           value=cfg_comunidad["nombre_comunidad"],
+          key="cfg_comunidad_nom",
       )
       input_nom_consejo = st.text_input(
           "Nombre del Consejo Comunal:",
           value=cfg_comunidad["nombre_consejo"],
+          key="cfg_consejo_nom",
       )
     with col_cc_conf2:
       input_periodo = st.text_input(
           "Período de Gestión:",
           value=cfg_comunidad["periodo"],
           placeholder="Ej: 2024 - 2026",
+          key="cfg_periodo_val",
       )
       input_vencimiento = st.text_input(
           "Fecha de Vencimiento / Elección:",
           value=cfg_comunidad["vencimiento"],
           placeholder="Ej: 06/09/2026",
+          key="cfg_vencimiento_val",
       )
 
     if st.button(
@@ -2493,6 +2239,84 @@ if "✏️ Configurar Comunidad & Formulario" in pestañas:
           "✅ Datos de la comunidad actualizados correctamente. Recargando..."
       )
       st.rerun()
+
+    st.markdown("---")
+    st.markdown("### 🏛️ Catálogo de Vocerías y Comités del Consejo Comunal")
+    st.info(
+        "ℹ️ Administre aquí únicamente los nombres de las vocerías o comités"
+        " oficiales. Los habitantes se asignarán a estos cargos directamente en"
+        " su ficha de registro."
+    )
+
+    col_v_gest1, col_v_gest2 = st.columns([1, 1.5])
+
+    with col_v_gest1:
+      st.markdown("##### ✍️ Registrar o Editar Vocería")
+      accion_voc_conf = st.radio(
+          "Acción Vocería:", ["Agregar Nueva", "Editar Existente"], horizontal=True, key="cfg_accion_voc"
+      )
+      id_voc_cfg_edit = None
+      v_comite_cfg = ""
+
+      df_voc_conf_all = cargar_vocerias_comite()
+      if accion_voc_conf == "Editar Existente":
+        if not df_voc_conf_all.empty:
+          sel_v_cfg_id = st.selectbox(
+              "Seleccione Vocería a Editar:",
+              df_voc_conf_all["id"].tolist(),
+              format_func=lambda i: df_voc_conf_all[df_voc_conf_all["id"] == i]["comite"].values[0],
+              key="cfg_sel_voc_id"
+          )
+          row_v_cfg_sel = df_voc_conf_all[df_voc_conf_all["id"] == sel_v_cfg_id].iloc[0]
+          id_voc_cfg_edit = row_v_cfg_sel["id"]
+          v_comite_cfg = row_v_cfg_sel["comite"]
+        else:
+          st.warning("No hay vocerías registradas para editar.")
+
+      comite_cfg_inp = st.text_input(
+          "Nombre de la Vocería / Comité:",
+          value=v_comite_cfg,
+          placeholder="Ej: Unidad de Finanzas, Unidad de Contraloría...",
+          key="cfg_comite_inp",
+      )
+
+      btn_cfg_voc_lbl = (
+          "💾 Actualizar Vocería"
+          if accion_voc_conf == "Editar Existente"
+          else "💾 Guardar Nueva Vocería"
+      )
+      if st.button(btn_cfg_voc_lbl, type="primary", use_container_width=True, key="cfg_btn_save_voc"):
+        if comite_cfg_inp.strip():
+          guardar_voceria(
+              comite_cfg_inp.strip(),
+              id_voceria=id_voc_cfg_edit,
+          )
+          st.success("✅ Vocería guardada con éxito.")
+          st.rerun()
+        else:
+          st.error("Ingrese el nombre de la vocería o comité.")
+
+    with col_v_gest2:
+      st.markdown("##### 📑 Listado Oficial de Vocerías")
+      if not df_voc_conf_all.empty:
+        st.dataframe(
+            df_voc_conf_all.rename(
+                columns={"id": "ID", "comite": "Nombre de la Vocería / Comité"}
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        id_del_voc_cfg = st.number_input(
+            "ID de Vocería a eliminar:", min_value=0, step=1, key="cfg_del_voc_num"
+        )
+        if st.button("🗑️ Eliminar Vocería Seleccionada", key="cfg_btn_del_voc"):
+          if id_del_voc_cfg > 0:
+            eliminar_voceria(int(id_del_voc_cfg))
+            st.warning("Vocería eliminada del catálogo.")
+            st.rerun()
+      else:
+        st.info("No hay vocerías registradas en la base de datos.")
 
     st.markdown("---")
     st.markdown("### ➕ Añadir Nuevo Campo Personalizado al Censo")
@@ -2597,7 +2421,7 @@ if st.session_state.rol_actual == "Master" and "👥 Usuarios y Permisos" in pes
       )
 
 # -----------------------------------------------------------------------------
-# TAB: RESPALDOS Y BORRADO
+# TAB: RESPALDOS Y BORRADO (INTEGRADO Y MEJORADO)
 # -----------------------------------------------------------------------------
 if "💾 Respaldos y Borrado" in pestañas:
   with tabs[pestañas.index("💾 Respaldos y Borrado")]:
@@ -2607,7 +2431,13 @@ if "💾 Respaldos y Borrado" in pestañas:
     col_res1, col_res2 = st.columns(2)
 
     with col_res1:
-      st.markdown("### 📤 Respaldo Estructural General")
+      st.markdown("### 📤 Respaldo Estructural General (Sistema Completo)")
+      st.info(
+          "ℹ️ Este respaldo incluye **todo el sistema**: habitantes,"
+          " configuración de comunidad, vocerías, usuarios, permisos,"
+          " bitácoras y configuraciones."
+      )
+
       try:
         with open(DB_FILE, "rb") as f:
           db_bytes = f.read()
@@ -2619,22 +2449,193 @@ if "💾 Respaldos y Borrado" in pestañas:
                 f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
             ),
             mime="application/x-sqlite3",
+            help="Descarga el archivo completo de la base de datos sqlite.",
             use_container_width=True,
         )
       except Exception as e:
         st.error(f"No se pudo leer la base de datos: {e}")
 
+      st.markdown("---")
+      st.markdown("### 📊 Exportar Planillas Sueltas (Excel / CSV)")
+      df_exp = cargar_habitantes()
+      if not df_exp.empty:
+        csv_bytes = df_exp.to_csv(index=False, sep=";", encoding="utf-8-sig")
+        st.download_button(
+            "📥 Descargar Habitantes (CSV)",
+            csv_bytes,
+            "censo_comunidad_habitantes.csv",
+            "text/csv",
+            use_container_width=True,
+        )
+
+        buffer_exc = io.BytesIO()
+        with pd.ExcelWriter(buffer_exc, engine="openpyxl") as writer:
+          df_exp.to_excel(writer, index=False, sheet_name="Censo")
+        st.download_button(
+            "📊 Descargar Habitantes (Excel)",
+            buffer_exc.getvalue(),
+            "censo_comunidad_habitantes.xlsx",
+            (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+            use_container_width=True,
+        )
+
     with col_res2:
-      st.markdown("### ⚠️ Zona Peligrosa: Borrado Completo")
-      confirmar_borrado = st.checkbox(
-          "Confirmo que deseo borrar todos los datos del censo y bitácoras."
+      st.markdown("### 🔄 Restaurar Sistema Completo (.db)")
+      st.warning(
+          "⚠️ Subir un archivo de base de datos `.db` sobrescribirá por completo"
+          " la información actual del sistema."
       )
-      if st.button(
-          "💣 BORRAR TODO EL CENSO", type="primary", use_container_width=True
+
+      db_upload = st.file_uploader(
+          "Cargar archivo de respaldo previo (.db)",
+          type=["db", "sqlite"],
+          key="upload_db_backup",
+      )
+      if db_upload is not None:
+        if st.button(
+            "🚀 Aplicar Restauración del Sistema",
+            type="primary",
+            use_container_width=True,
+        ):
+          try:
+            with open(DB_FILE, "wb") as f:
+              f.write(db_upload.getbuffer())
+            st.success("✅ ¡Sistema restaurado con éxito! Recargando aplicación...")
+            st.rerun()
+          except Exception as e:
+            st.error(f"Error al restaurar la base de datos: {e}")
+
+      st.markdown("---")
+      st.markdown("### 📥 Importar Planilla de Habitantes (CSV / Excel)")
+      uploaded_file = st.file_uploader(
+          "Cargar planilla de datos", type=["csv", "xlsx"], key="upload_plan"
+      )
+      if uploaded_file is not None and st.button(
+          "📥 Procesar e Importar Planilla", use_container_width=True
       ):
-        if confirmar_borrado:
-          borrar_todo_el_censo()
-          st.success("🔥 Base de datos vaciada completamente.")
+        try:
+          if uploaded_file.name.endswith(".xlsx"):
+            df_imp = pd.read_excel(uploaded_file, dtype=str)
+          else:
+            try:
+              df_imp = pd.read_csv(
+                  uploaded_file, sep=";", encoding="utf-8-sig", dtype=str
+              )
+              if len(df_imp.columns) <= 1:
+                uploaded_file.seek(0)
+                df_imp = pd.read_csv(uploaded_file, sep=",", dtype=str)
+            except Exception:
+              uploaded_file.seek(0)
+              df_imp = pd.read_csv(uploaded_file, sep=",", dtype=str)
+
+          df_imp.columns = [
+              str(col).strip().lower().replace(" ", "_")
+              for col in df_imp.columns
+          ]
+
+          def buscar_valor_columna(row, lista_posibles):
+            for col in lista_posibles:
+              if col in row and pd.notna(row[col]):
+                return str(row[col]).strip()
+            return ""
+
+          registros_procesados = 0
+          for _, row in df_imp.iterrows():
+            ced_val = buscar_valor_columna(
+                row, ["cedula", "ci", "cédula", "documento"]
+            )
+            if not ced_val or ced_val.lower() == "nan":
+              continue
+
+            f_nac_imp = parsear_fecha_bd(
+                buscar_valor_columna(
+                    row, [
+                        "fecha_nacimiento",
+                        "fecha_nac",
+                        "fecha_nacimiento_dd/mm/yyyy",
+                    ]
+                )
+            ).strftime("%Y-%m-%d")
+            f_lleg_imp = parsear_fecha_bd(
+                buscar_valor_columna(
+                    row, ["fecha_llegada", "fecha_llegada_a_la_comunidad"]
+                )
+            ).strftime("%Y-%m-%d")
+
+            jefe_ced_imp = buscar_valor_columna(
+                row, [
+                    "jefe_hogar_cedula",
+                    "jefe_cedula",
+                    "cedula_jefe",
+                    "c.i._jefe_hogar",
+                    "jefe_hogar",
+                    "jefe",
+                ]
+            )
+
+            es_jefe_raw = buscar_valor_columna(
+                row, ["es_jefe_hogar", "es_jefe", "jefe_de_hogar"]
+            )
+            es_jefe_val = (
+                1
+                if es_jefe_raw.lower() in ["1", "true", "si", "sí"]
+                else 0
+            )
+
+            guardar_habitante((
+                ced_val,
+                buscar_valor_columna(row, ["nombres", "nombre"]),
+                buscar_valor_columna(row, ["apellidos", "apellido"]),
+                buscar_valor_columna(row, ["sexo", "genero", "género"])
+                or "No especificado",
+                f_nac_imp,
+                f_lleg_imp,
+                buscar_valor_columna(
+                    row, ["direccion", "dirección", "direccion_detallada"]
+                ),
+                buscar_valor_columna(row, ["manzana", "sector"]),
+                buscar_valor_columna(
+                    row, ["telefono", "teléfono", "celular"]
+                ),
+                "Soltero/a",
+                "",
+                0,
+                "[]",
+                0,
+                "Ninguno",
+                buscar_valor_columna(
+                    row, ["condicion_salud", "condición_salud", "salud"]
+                )
+                or "Ninguna",
+                buscar_valor_columna(row, ["detalle_salud", "detalles_salud"]),
+                es_jefe_val,
+                jefe_ced_imp,
+                buscar_valor_columna(row, ["campos_adicionales"]) or "{}",
+            ))
+            registros_procesados += 1
+
+          st.success(
+              f"✅ Importación completada. Se procesaron {registros_procesados}"
+              " registros correctamente."
+          )
           st.rerun()
-        else:
-          st.warning("Marque la casilla para confirmar.")
+        except Exception as e:
+          st.error(f"Error al importar archivo: {e}")
+
+    st.markdown("---")
+    st.markdown("### ⚠️ Zona Peligrosa: Borrado Completo del Censo")
+    confirmar_borrado = st.checkbox(
+        "Confirmo que deseo borrar todos los datos del censo definitivamente."
+    )
+
+    if st.button(
+        "💣 BORRAR TODO EL CENSO", type="primary", use_container_width=True
+    ):
+      if confirmar_borrado:
+        borrar_todo_el_censo()
+        st.success("🔥 Base de datos vaciada completamente.")
+        st.rerun()
+      else:
+        st.warning("Marque la casilla para confirmar.")
